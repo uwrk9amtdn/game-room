@@ -3,8 +3,17 @@ import { unlockForm } from '/js/kit/unlock.js';
 
 const HELP = 'Fights against the computer. Keyboard or gamepad; open Controls in the game for the keys. ' +
   'Fullscreen is beside Exit game; Escape leaves it. The game pauses when you click outside it.';
-const DELAYS = [2, 3, 4, 5, 6, 8, 10, 12];
-const FRAME = '/solo/mk4/index.html?net=1';
+// Mirrors MODES in ../server/index.js.
+const MODES = {
+  rollback: { label: 'Rollback (recommended)', delays: [1, 2, 3, 4, 6, 8], delay: 2,
+    hint: 'Both games run at full speed and correct themselves when the other player\'s input arrives. ' +
+      'Raise the delay only if the network line says so.' },
+  lockstep: { label: 'Lockstep', delays: [2, 3, 4, 5, 6, 8, 10, 12], delay: 4,
+    hint: 'Both games wait for both players\' input. Simple, but the delay must cover the round trip, ' +
+      'or the game slows down.' },
+};
+const frameUrl = (mode) => `/solo/mk4/index.html?net=1${mode === 'rollback' ? '&rollback=1' : ''}`;
+const ms = (frames) => Math.round(frames * 1000 / 60);
 
 // Whether this browser may load the game files: on the server's machine, or
 // after the tester password. Resolves true when the files are reachable.
@@ -16,24 +25,39 @@ async function hasAccess(signal) {
 }
 
 function inviteForm(container, submit) {
-  const select = el('select', {}, ...DELAYS.map((d) => el('option', {
-    value: String(d), textContent: `${d} frames (${Math.round(d * 1000 / 60)} ms)`, selected: d === 4,
-  })));
-  const label = el('label', {}, 'Input delay ', select);
-  const hint = el('p', { className: 'hint', textContent:
-    'Both players see their own moves this much later. Raise it if the game stalls on a slow connection.' });
+  const mode = el('select', { name: 'mode' }, ...Object.entries(MODES).map(([value, m]) =>
+    el('option', { value, textContent: m.label })));
+  const delay = el('select', { name: 'delay' });
+  const hint = el('p', { className: 'hint' });
+  function fill() {
+    const m = MODES[mode.value];
+    delay.replaceChildren(...m.delays.map((d) => el('option', {
+      value: String(d), textContent: `${d} frames (${ms(d)} ms)`, selected: d === m.delay,
+    })));
+    hint.textContent = m.hint;
+  }
+  mode.addEventListener('change', fill);
+  fill();
   const button = el('button', { className: 'primary', textContent: 'Invite' });
-  button.addEventListener('click', () => submit({ delay: Number(select.value) }));
-  container.append(label, hint, button);
+  button.addEventListener('click', () => submit({ mode: mode.value, delay: Number(delay.value) }));
+  container.append(el('label', {}, 'Netcode ', mode), el('label', {}, 'Input delay ', delay), hint, button);
 }
 
 // The smallest offered delay whose round-trip budget (two delays, less a frame
 // of scheduling) covers the measured round trip.
-function suggestDelay(rtt) {
-  return DELAYS.find((d) => 2 * d * 1000 / 60 - 17 >= rtt * 1.2) ?? DELAYS[DELAYS.length - 1];
+// Lockstep: the round trip must fit in two delays less a frame. Rollback: one
+// way must fit in the delay plus the rollback window (8 ticks).
+const WINDOW = 8;
+function suggestDelay(mode, rtt) {
+  const { delays } = MODES[mode];
+  const fits = mode === 'rollback'
+    ? (d) => ms(d + WINDOW) - 17 >= rtt * 0.6
+    : (d) => ms(2 * d) - 17 >= rtt * 1.2;
+  return delays.find(fits) ?? delays[delays.length - 1];
 }
 
-function describeOptions(options) { return `Online · delay ${options.delay}`; }
+const modeOf = (options) => options.mode ?? 'lockstep'; // matches from before the choice
+function describeOptions(options) { return `Online · ${modeOf(options)} · delay ${options.delay}`; }
 
 function describeResult({ players, over }) {
   const who = players[over.seat];
@@ -80,7 +104,8 @@ function mount(container, ctx) {
     const rival = players[1 - you];
     if (!connected[1 - you]) return say(`${rival} lost the connection. Waiting for them to come back…`);
     if (!started) return say(ready[1 - you] ? 'Loading the game…' : `Waiting for ${rival} to load the game…`);
-    say(stalled ? `Waiting for ${rival}…` : `Online match against ${rival}. Input delay ${snapshot.options.delay} frames.`);
+    say(stalled ? `Waiting for ${rival}…`
+      : `Online match against ${rival}: ${modeOf(snapshot.options)}, input delay ${snapshot.options.delay} frames.`);
     // Your keys always drive your own fighter; the game only needs Player 2 to join in.
     guide.hidden = false;
     guide.textContent = you === 0
@@ -91,20 +116,22 @@ function mount(container, ctx) {
     renderNetwork();
   }
 
-  // The full round trip must fit in twice the input delay, or the game waits.
   function renderNetwork() {
-    if (!stats || stats.rtt === null) return;
-    const budget = Math.round(2 * stats.delay * 1000 / 60);
+    if (!stats || stats.rtt === null || !snapshot) return;
+    const mode = modeOf(snapshot.options);
     const waited = Math.round(stats.waited * 100);
-    const advice = stats.rtt > budget - 17 || waited > 5
-      ? ` Too slow for ${stats.delay} frames of delay: invite again with ${suggestDelay(stats.rtt)} frames.` : '';
+    const better = suggestDelay(mode, stats.rtt);
+    const advice = waited > 5 && better > stats.delay
+      ? ` The game is waiting: invite again with ${better} frames of delay.` : '';
+    const detail = mode === 'rollback'
+      ? `${stats.rollbacks ?? 0} corrections in the last second (longest ${stats.maxRollback ?? 0} frames)`
+      : `fits up to about ${ms(2 * stats.delay) - 17} ms`;
     network.hidden = false;
-    network.textContent = `Network: round trip ${stats.rtt} ms (fits up to about ${budget - 17} ms), ` +
-      `waited ${waited}% of the last second.${advice}`;
+    network.textContent = `Network: round trip ${stats.rtt} ms, ${detail}, waited ${waited}%.${advice}`;
   }
 
   function openFrame() {
-    frame = el('iframe', { src: FRAME, title: 'Mortal Kombat 4', className: 'standaloneGame' });
+    frame = el('iframe', { src: frameUrl(modeOf(snapshot.options)), title: 'Mortal Kombat 4', className: 'standaloneGame' });
     frame.setAttribute('allow', 'autoplay; fullscreen; gamepad');
     host.replaceChildren(frame);
   }
@@ -116,7 +143,8 @@ function mount(container, ctx) {
       loaded = true;
       sync();
     } else if (msg.type === 'inputs') {
-      ctx.send({ action: 'input', from: msg.from, masks: msg.masks, ack: msg.ack });
+      ctx.send({ action: 'input', from: msg.from, masks: msg.masks, ack: msg.ack,
+        ...(Number.isInteger(msg.lead) ? { lead: msg.lead } : {}) });
     } else if (msg.type === 'hash') {
       ctx.send({ action: 'hash', tick: msg.tick, hi: msg.hi, lo: msg.lo });
     } else if (msg.type === 'stall') {

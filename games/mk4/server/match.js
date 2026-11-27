@@ -5,6 +5,7 @@ import { randomUUID, randomInt } from 'node:crypto';
 
 export const MAX_BATCH = 64; // ticks per input message
 export const MAX_WORD = 0xffffff; // player mask | system mask << 16
+export const MAX_REPORTED_LEAD = 255; // rollback time sync: ticks ahead of the known remote input
 const HASHES_KEPT = 64;
 
 export class Mk4Match {
@@ -20,6 +21,7 @@ export class Mk4Match {
     this.spectators = 0;
     this.inputs = [[], []]; // per seat: words from tick base[seat] on, not yet acknowledged
     this.base = [0, 0];
+    this.lead = [0, 0]; // rollback: each seat's last reported lead, passed to the other
     this.next = [0, 0]; // per seat: the next tick it must send
     this.hashes = new Map(); // tick -> [seat 0 hash, seat 1 hash]
     this.lastHash = 0;
@@ -54,7 +56,7 @@ export class Mk4Match {
     }
   }
 
-  input(seat, { from, masks, ack }) {
+  input(seat, { from, masks, ack, lead = 0 }) {
     if (!this.started) return 'The match has not started.';
     if (from !== this.next[seat] || !Array.isArray(masks) || masks.length < 1 || masks.length > MAX_BATCH ||
         !masks.every((w) => Number.isInteger(w) && w >= 0 && w <= MAX_WORD)) {
@@ -63,6 +65,8 @@ export class Mk4Match {
     const other = 1 - seat;
     if (this.next[seat] + masks.length > this.next[other] + this.maxLead) return 'Input too far ahead.';
     if (!Number.isInteger(ack) || ack < this.base[other] || ack > this.next[other]) return 'Bad input.';
+    if (!Number.isInteger(lead) || Math.abs(lead) > MAX_REPORTED_LEAD) return 'Bad input.';
+    this.lead[seat] = lead;
     this.inputs[seat].push(...masks);
     this.next[seat] += masks.length;
     // The sender has the other seat's inputs up to `ack`: never resend those.
@@ -120,7 +124,10 @@ export class Mk4Match {
       sent: seat === null ? null : this.next[seat],
       // `acked`: how many of this seat's ticks the other browser has received
       // (it measures the round trip).
-      remote: seat === null ? null : { from: this.base[other], masks: this.inputs[other], acked: this.base[seat] },
+      // `lead`: the other seat's reported lead (rollback time sync; 0 in lockstep).
+      remote: seat === null ? null : {
+        from: this.base[other], masks: this.inputs[other], acked: this.base[seat], lead: this.lead[other],
+      },
       verified: this.lastHash,
       // Never archived: a replay would need every input, which is not kept.
       moves: [],

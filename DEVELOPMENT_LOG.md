@@ -299,3 +299,33 @@
 
 **Next steps**
 - Second user test with the readout; then decide on rollback.
+
+## 2026-11-27 18:30 +03:00 — MK4 online: rollback netcode by default
+
+**Changes made**
+- Invite form: netcode choice, rollback (recommended; delay 1-8 frames, default 2) or
+  lockstep (2-12, default 4). Options `{mode, delay}`; `MODES` in `games/mk4/server/index.js`;
+  an invite without `mode` is rollback.
+- `Mk4Match`: inputs may carry `lead` (integer, |lead| ≤ 255), passed to the other seat as
+  `remote.lead` (rollback time sync).
+- View: loads the frame with `&rollback=1` for rollback, relays `lead`, status names the
+  netcode, readout shows corrections per second and the longest correction; delay advice per
+  netcode.
+
+**How it works**
+- Rollback itself lives in mk4-port (`port/rollback.mjs`, `port/rollback-session.mjs`,
+  `doc/rollback.md`). The server stays an ordered input relay with hash comparison; the
+  existing lead limit (2 × delay + 64 ticks) already covers the 8-tick rollback window.
+- Lockstep is kept as an option in case rollback misbehaves on a real link.
+
+**Testing**
+- `npm test` 324/324 (options, `lead` validation and relay).
+- mk4-port's `check-game-room-online.py` through this server: rollback and lockstep both ok
+  locally; with ~220 ms round trip (added WebSocket delay) rollback 59.4 ticks/s with no
+  waiting, lockstep 34.4 ticks/s waiting 60%; no server errors, hashes verified.
+- Found and fixed in mk4-port on the way: a rollback time-sync deadlock and a tick-0 hash
+  this server refused.
+- Not tested: a real network.
+
+**Next steps**
+- Deploy (this repo plus a fresh `mk4-build/`), then a real two-machine match.

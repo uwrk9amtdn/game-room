@@ -185,7 +185,7 @@ test('MK4 online: invite, accept, ready, relay inputs, leave; not offered withou
   }
   ann.send({ type: 'invite', to: 'bob', game: 'mk4', options: { delay: 3 } });
   const invite = await bob.next('invite');
-  assert.deepEqual(invite.options, { delay: 3 });
+  assert.deepEqual(invite.options, { mode: 'rollback', delay: 3 });
   bob.send({ type: 'accept', id: invite.id });
   const first = await ann.next('match');
   assert.equal(first.snapshot.started, false);
@@ -197,7 +197,7 @@ test('MK4 online: invite, accept, ready, relay inputs, leave; not offered withou
   assert.equal(started.snapshot.options.delay, 3);
   ann.send({ type: 'action', action: 'input', from: 0, masks: [0, 0, 0, 5], ack: 0 });
   const relayed = await bob.next('match', (m) => m.snapshot.remote.masks.length === 4);
-  assert.deepEqual(relayed.snapshot.remote, { from: 0, masks: [0, 0, 0, 5], acked: 0 });
+  assert.deepEqual(relayed.snapshot.remote, { from: 0, masks: [0, 0, 0, 5], acked: 0, lead: 0 });
   assert.equal(relayed.snapshot.you, bobSeat);
   // In a match: no solo launch, no other invitations.
   ann.send({ type: 'soloStart', game: 'mk4', token: null });

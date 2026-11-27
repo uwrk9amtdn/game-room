@@ -134,10 +134,14 @@ committed here.
   never archives a match; spectators see a notice. The view
   (`games/mk4/client/index.js`) embeds the frame with `?net=1`, shows the
   password form if this browser has no access yet, and offers Leave match and
-  Fullscreen. It tells each player their side and that Player 2 must join in
-  on the game's "1 on 1 / 2 on 2" screen, and shows a network readout (round
-  trip from the snapshot's `remote.acked`, share of frames waited, suggested
-  delay; delays 2-12 frames). Lockstep details live in mk4-port's
+  Fullscreen. The inviter picks the netcode: rollback (default; delay 1-8,
+  default 2; frame URL `?net=1&rollback=1`) or lockstep (delay 2-12, default 4);
+  options `{mode, delay}`, `games/mk4/server/index.js` `MODES`. The relay passes
+  each seat's rollback time-sync `lead` to the other (`remote.lead`). The view
+  tells each player their side and that Player 2 must join in on the game's
+  "1 on 1 / 2 on 2" screen, and shows a network readout (round trip from
+  `remote.acked`, corrections per second in rollback, share of frames waited,
+  suggested delay). Lockstep details live in mk4-port's
   `doc/game-room-integration.md`. Tests: `games/mk4/test/match.test.js`, the
   online case in `test/local-game.test.js`, and mk4-port's
   `tools/check-game-room-online.py` (two Chromium players).

@@ -42,7 +42,8 @@ lobby and buildless browser JavaScript. Games provide server/client modules.
 - One tester password covers Tape-Out and MK4: cookie scoped to `/solo/`, unlock at
   `/solo/unlock`; form in `public/js/kit/unlock.js`.
 - Standalone games declare their embedded page in `meta.solo`; the solo launch keys on it.
-  MK4 has both: online 1v1 matches (lockstep input relay, `games/mk4/server/match.js`) and solo.
+  MK4 has both: online 1v1 matches (input relay, `games/mk4/server/match.js`; netcode per invite:
+  rollback by default, or lockstep) and solo.
 
 # Docs
 
