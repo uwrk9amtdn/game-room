@@ -148,11 +148,16 @@ start()
 		(umask 077 && od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$token")
 	fi
 	cd "$dir" || exit 1
-	# Both supervisors inherit the same server configuration.
-	PORT="$port" DATA_DIR="$data_dir" ADMIN_TOKEN="$(cat "$token")" \
-		ADMIN_PASSWORD_FILE="$password" GAME_ROOM_STATE="$state" GAME_ROOM_SCRIPT="$self" \
-		PROXY_ADDRESSES="$proxy_addresses" PROXY_HTTPS="$proxy_https" \
+	# Both supervisors inherit the same server configuration. Exported in a
+	# subshell: assignments placed before a function call (VAR=x func) reach
+	# the programs it starts in bash and dash, but not in FreeBSD's sh, where
+	# daemon(8) then started the server without any of them.
+	(
+		export PORT="$port" DATA_DIR="$data_dir" ADMIN_TOKEN="$(cat "$token")" \
+			ADMIN_PASSWORD_FILE="$password" GAME_ROOM_STATE="$state" GAME_ROOM_SCRIPT="$self" \
+			PROXY_ADDRESSES="$proxy_addresses" PROXY_HTTPS="$proxy_https"
 		launch_supervisor
+	)
 	sleep 1
 	if running; then
 		echo "started (pid $pid)"

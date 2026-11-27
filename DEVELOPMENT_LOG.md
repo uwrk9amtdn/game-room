@@ -329,3 +329,26 @@
 
 **Next steps**
 - Deploy (this repo plus a fresh `mk4-build/`), then a real two-machine match.
+
+## 2026-11-27 18:55 +03:00 — Fix: FreeBSD server started without its configuration
+
+**Changes made**
+- `deploy/game-room` `start()`: the server settings (`PORT`, `DATA_DIR`, `ADMIN_TOKEN`,
+  `ADMIN_PASSWORD_FILE`, `GAME_ROOM_STATE`, `GAME_ROOM_SCRIPT`, `PROXY_*`) are now exported in a
+  subshell before `launch_supervisor`, instead of being written in front of the function call.
+
+**How it works**
+- `VAR=x func` passes `VAR` on to programs started by `func` in bash and dash, but not in
+  FreeBSD's `/bin/sh` (the script's shell). On serv00 `daemon(8)` therefore started Node with
+  none of the settings: the admin panel said "The server was not told where the admin password
+  is kept" even after `set-password` and `restart`, and updates logged "the server cannot be told
+  of the restart" (no admin token). Linux was unaffected.
+
+**Testing**
+- On s0.serv00.com with `/bin/sh`: a variable written before a function call reached `env` and
+  `daemon` children 0 times; exported in a subshell, it did. `sh -n` passes locally and there.
+- Not yet deployed: the server still runs the old script.
+
+**Next steps**
+- Push, pull on the server, `deploy/game-room restart`; then check the process environment
+  and the admin login.
