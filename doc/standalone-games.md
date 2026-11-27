@@ -1,4 +1,5 @@
-This document covers Tape-Out's protected single-player hosting and presence lifecycle.
+This document covers standalone single-player games: Tape-Out's protected hosting,
+MK4's local-only hosting, and their shared presence lifecycle.
 
 ## Using the beta
 
@@ -86,3 +87,46 @@ multiplayer conflicts, and restart restrictions.
 
 For browser checks, verify the actual admin form, wrong-password feedback,
 embedded rendering/audio, mobile width, player status, exit, and password rotation.
+
+## MK4
+
+Mortal Kombat 4 is built from the owner's game files in the separate
+`/home/hd/Desktop/mk4-port` repository. Nothing derived from the game is
+committed here.
+
+- **Install the build:** in `mk4-port`, run `node tools/export-game-room.mjs`.
+  It writes the ignored `mk4-build/` directory here: engine, data, CD tracks and
+  frame page as real copies (about 240 MB), plus `manifest.json`. For a deployed
+  server, copy that directory to `<server-repository-root>/mk4-build/`, like
+  `tape-out-beta-2/`. The server re-reads the manifest every 5 seconds, so no
+  restart is needed; deleting the directory removes the game.
+  `startServer({ mk4Dir })` overrides the location.
+- **Who sees it:** everyone, while the manifest exists. Without it the game is
+  not listed, and its players appear to others as plain "busy".
+- **Password:** the tester password set under **Tester access** in `/admin`
+  (the same one as Tape-Out) unlocks MK4 for everyone except the server's own
+  machine. The shared unlock address is `/solo/unlock` (Tape-Out's old
+  `/solo/tape-out/unlock` still works); the session cookie is scoped to `/solo/`,
+  so one unlock covers both games. HTTPS, rate limiting, session expiry and
+  password rotation behave as described above for Tape-Out. A password change
+  ends remote MK4 sessions but not local play.
+- **The server's own machine:** a request that reaches the server directly from
+  loopback (not relayed by the proxy, per `origin()` in `server/proxy.js`) with a
+  loopback `Host` (localhost, 127.0.0.1, [::1]) needs no password; its game page
+  shows Play instead of the password form (`/solo/mk4/access` answers
+  `{ local }`).
+- **Serving:** `server/local-game.js` serves `/solo/mk4/<name>` only for names in
+  the manifest; 401 without access, 404 for anything unlisted.
+  `Cache-Control: private, no-cache` with an ETag (build id, size, mtime), so a
+  relaunch revalidates (304) instead of downloading ~40 MB again.
+- **Frame:** `meta.solo` names the page the platform embeds (both standalone
+  games declare it). The frame shows load progress, a Play/Paused overlay
+  (clicking outside the game or hiding the tab pauses it), Controls, and errors;
+  it follows the Sound setting (`chess.muted`) through the storage event, and
+  disposes the engine on teardown. The platform's Fullscreen button returns
+  keyboard focus to the frame.
+- **Shared form:** `public/js/kit/unlock.js` is the password form both games use.
+- **Tests:** `test/local-game.test.js` uses a synthetic build (listing, local
+  access, password, proxy headers, rotation, removal). The real build is checked
+  with `tools/check-game-room.py` in `mk4-port` (Chromium, local and remote
+  visitor).

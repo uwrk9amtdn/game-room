@@ -17,7 +17,8 @@ import { Stats } from './stats.js';
 import { createPanel } from './panel.js';
 import { FeedbackBox } from './feedback.js';
 import { origin, proxySettings } from './proxy.js';
-import { StandaloneAccess } from './standalone.js';
+import { StandaloneAccess, UNLOCK } from './standalone.js';
+import { LocalGame } from './local-game.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
@@ -140,10 +141,11 @@ function currentVersion() {
 // interface for the update script; `passwordFile` (the admin password's
 // hash), `stateDir` and `updateScript` are for the admin panel, see
 // panel.js. Remaining options go to the Lobby. Port 0 picks a free port.
-// `tapeOutDir` lets integration tests supply assets without the private build.
+// `tapeOutDir` lets integration tests supply assets without the private build;
+// `mk4Dir` is where the MK4 port exports its private local-only build.
 export async function startServer({
   port = 9494, gamesDir = GAMES, dataDir = null, adminToken = null,
-  tapeOutDir = path.join(root, 'tape-out-beta-2'),
+  tapeOutDir = path.join(root, 'tape-out-beta-2'), mk4Dir = path.join(root, 'mk4-build'),
   passwordFile = null, stateDir = null, updateScript = null, panelOptions = {}, feedbackOptions = {}, ...lobbyOptions
 } = {}) {
   const games = await loadGames(gamesDir);
@@ -161,12 +163,23 @@ export async function startServer({
   const proxy = proxySettings(panelOptions);
   const standalone = new StandaloneAccess({ dataDir, assetDir: tapeOutDir, proxy });
   await standalone.load();
-  const lobby = new Lobby({ games, archive, stats, feedback, ...lobbyOptions, standalone });
+  const mk4 = new LocalGame({ id: 'mk4', dir: mk4Dir, proxy, access: standalone });
+  await mk4.refresh();
+  // A new export (or its removal) shows in the game list without a restart.
+  const watchMk4 = setInterval(() => mk4.refresh(), 5000).unref();
+  const lobby = new Lobby({ games, archive, stats, feedback, ...lobbyOptions, standalone, localGames: { mk4 } });
   const panel = createPanel({
     lobby, archive, stats, feedback, passwordFile, stateDir, updateScript, version, ...panelOptions, standalone,
   });
   const server = http.createServer((req, res) => {
-    if (req.url.startsWith('/solo/tape-out/')) {
+    if (req.url.startsWith(mk4.base)) {
+      mk4.handle(req, res).catch((err) => {
+        console.error('Error serving MK4:', err);
+        stats.error();
+        if (!res.headersSent) res.writeHead(500).end();
+        else res.destroy();
+      });
+    } else if (req.url.startsWith('/solo/tape-out/') || UNLOCK.some((p) => req.url.split('?')[0] === p)) {
       standalone.handle(req, res).catch((err) => {
         console.error('Error serving standalone game:', err);
         stats.error();
@@ -184,7 +197,7 @@ export async function startServer({
     } else serveStatic(req, res, games, gamesDir);
   });
   const wss = new WebSocketServer({ server, maxPayload: 4096 });
-  wss.on('connection', (ws, req) => lobby.connect(ws, origin(req, proxy).address));
+  wss.on('connection', (ws, req) => lobby.connect(ws, origin(req, proxy).address, mk4.isLocal(req)));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, () => {
@@ -194,6 +207,7 @@ export async function startServer({
           for (const ws of wss.clients) ws.terminate();
           server.close();
           stats.stop();
+          clearInterval(watchMk4);
         },
         // Resolves once every finished match and the statistics are on disk.
         saved: () => Promise.all([archive.writing, feedback.writing, stats.save()]),

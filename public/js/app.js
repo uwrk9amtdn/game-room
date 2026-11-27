@@ -185,8 +185,9 @@ const handlers = {
     pendingSolo = null;
     if (match) closeMatch();
     solo = msg.game;
-    const frame = el('iframe', { src: '/solo/tape-out/index.html', title: 'Tape-Out Beta', className: 'standaloneGame' });
-    frame.setAttribute('allow', 'autoplay; fullscreen');
+    const meta = games.get(solo);
+    const frame = el('iframe', { src: meta.solo, title: meta.name, className: 'standaloneGame' });
+    frame.setAttribute('allow', 'autoplay; fullscreen; gamepad');
     $('matchHost').replaceChildren(frame);
     showPlayers(false);
     render();
@@ -479,6 +480,8 @@ $('soloFullscreen').addEventListener('click', async () => {
   if (!solo || !frame) return;
   try { await frame.requestFullscreen(); }
   catch { toast('The browser could not open fullscreen.'); }
+  // Keys go to the game again, not to this button.
+  frame.focus();
 });
 
 // One match in a grid: the last seat's name, the game's own preview, the

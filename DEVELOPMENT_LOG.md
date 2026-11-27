@@ -155,3 +155,92 @@
   context, shared cooldown, exit and password rotation. Mobile width remained
   within a 390-pixel viewport; no uncaught browser exceptions occurred.
 - JavaScript syntax checks and `git diff --check` passed.
+
+## 2026-11-27 11:05 +03:00 — Add MK4 as a local-only standalone game
+
+**Features implemented**
+- `games/mk4/`: Mortal Kombat 4 as a single-player standalone game, built from
+  the user's own files in the `mk4-port` repository and exported into the
+  ignored `mk4-build/`. Play button on the game page; the platform's
+  Fullscreen, Feedback and Exit game apply.
+- `server/local-game.js` (`LocalGame`): serves `/solo/mk4/<name>` for names in
+  `mk4-build/manifest.json` only, only to direct loopback requests with a
+  loopback `Host`; the same 404 for everything else. ETag + `private, no-cache`.
+
+**Changes made**
+- Lobby: `localGames` option, `canSee(conn, id)`; local-only games are left
+  out of the `joined` game list for other connections, `soloStart` accepts them
+  without a token for local connections, and the user list shows their players
+  as busy with `game: null` to anyone who cannot see the game.
+- `startServer({ mk4Dir })`, manifest re-read every 5 s (export/removal without
+  restart); WebSocket connections carry a `local` flag.
+- Standalone metadata: `meta.solo` names the embedded page (Tape-Out and MK4);
+  the iframe takes title from `meta.name` and allows `gamepad`.
+- Fullscreen button returns keyboard focus to the iframe.
+- `test/helpers.js` `connect(port, options)` passes WebSocket options (headers).
+
+**How it works**
+- Local check: `origin(req, proxy).local` (direct loopback, no trusted proxy
+  headers) plus `Host` matching localhost/127.0.0.1/[::1]. The Host rule blocks
+  DNS rebinding and a proxy that forwards without `X-Forwarded-For`.
+- Rejected: a Tape-Out-style password (would still send files derived from the
+  game to remote players; no redistribution); serving directly from
+  `mk4-port/private/` (couples repositories, serves whatever is there).
+
+**Testing**
+- `npm test`: 318/318, including new `test/local-game.test.js` (Host names;
+  hidden without build; listing/launch/serving only locally; 304; unlisted,
+  manifest, traversal and bad-escape paths 404; proxied and foreign-Host 404;
+  remote player sees "busy" with no game id; invitation blocked; re-launch).
+- Chromium against the real export (`tools/check-game-room.py` in mk4-port):
+  listed, loads in 0.3 s from cache, runs, pauses on outside click, mute via
+  the Sound key suspends engine audio, fullscreen focus, exit, fresh relaunch,
+  proxied request 404, no page errors.
+- Not tested: real gamepad, Firefox, the public deployment itself (the rule is
+  covered by the proxy-header tests).
+
+**Next steps**
+- User acceptance of MK4 single-player inside Game Room.
+
+## 2026-11-27 12:00 +03:00 — MK4 for remote players behind the tester password
+
+**Changes made**
+- MK4 is listed to everyone while `mk4-build/` exists; remote visitors unlock it
+  with the tester password (the same as Tape-Out's). The server's own machine
+  still plays without a password. Replaces the localhost-only rule.
+- `server/standalone.js`: session cookie scoped to `/solo/` (was
+  `/solo/tape-out/`), shared unlock address `/solo/unlock` (old address kept),
+  `cookie(req)`/`checkRequest(req)`.
+- `server/local-game.js`: `allowed(req)` = local or valid tester session; 401
+  without access; `/solo/mk4/access` answers `{ local }` for the game page.
+- Lobby: `canSee` = game present and its build (if any) available; `soloStart`
+  for MK4 needs the token unless the connection is local;
+  `endPasswordSessions` (used by the admin password change) leaves local MK4
+  play running.
+- `public/js/kit/unlock.js`: shared password form; Tape-Out and MK4 clients use
+  it. MK4 shows Play locally, the form elsewhere. `meta.localOnly` removed.
+- Admin: section renamed "Tester access (Tape-Out, MK4)".
+- `mk4-build/` now holds real copies (no symlinks), so it can be copied to the
+  server; still Git-ignored.
+
+**How it works**
+- The user chose the shared tester password over separate MK4 access.
+- Rejected: serving MK4 to every visitor without a password (public
+  distribution of the game's files).
+
+**Testing**
+- `npm test`: 318/318. `test/local-game.test.js` rewritten: hidden without a
+  build; local access and Play without password; remote 401, 409 before a
+  password is set, wrong password 401, plain HTTP 403, unlock sets
+  `Path=/solo/; Secure`, then files served; lobby refuses null/forged tokens and
+  accepts the real one; password rotation ends the remote session and its file
+  access but not local play; removing the build hides the game. The Tape-Out
+  test passes unchanged.
+- Chromium against the real build (`tools/check-game-room.py` in mk4-port),
+  20/20: local flow as before, plus a remote visitor (non-loopback host name)
+  sees the password form, gets 401 before unlocking, wrong password refused,
+  plays after unlocking.
+- Not tested: on the deployed server behind the real proxy.
+
+**Next steps**
+- Copy `mk4-build/` to the server and check a remote launch there.

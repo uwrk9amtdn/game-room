@@ -32,9 +32,14 @@ export class Lobby {
   // `limits` holds per-game overrides
   // passed to validateOptions, keyed by game id; with `graceMs` it lets tests
   // run short games.
-  constructor({ games, archive = new Archive(), stats = null, feedback = null, limits = {}, graceMs = 30_000, standalone = null }) {
+  // `standalone` holds the tester password for protected single-player games;
+  // `localGames` maps a game id to its LocalGame (server/local-game.js), a
+  // private build that may be absent.
+  constructor({ games, archive = new Archive(), stats = null, feedback = null, limits = {}, graceMs = 30_000, standalone = null,
+    localGames = {} }) {
     this.games = games;
     this.standalone = standalone;
+    this.localGames = localGames;
     this.archive = archive;
     this.stats = stats;
     this.feedback = feedback;
@@ -51,10 +56,15 @@ export class Lobby {
   // A standalone game has presence, but no opponent, spectators or archive.
   startSolo(user, msg) {
     const fail = (message) => this.send(user, { type: 'soloError', message });
-    if (msg.game !== 'tape-out' || !this.games.get(msg.game)?.meta.singlePlayer) return fail('Unknown single-player game.');
+    const game = this.games.get(msg.game);
+    const built = Boolean(this.localGames[msg.game]);
+    if (!game?.meta.singlePlayer || (msg.game !== 'tape-out' && !built) || !this.canSee(user.conn, msg.game)) {
+      return fail('Unknown single-player game.');
+    }
     if (user.match || user.solo) return fail('You are already in a game.');
     if (this.restart) return fail(PAUSED);
-    if (!this.standalone?.check(msg.token)) return fail('Enter the tester password to play.');
+    // On the server's own machine a private build needs no password.
+    if (!(built && user.conn?.local) && !this.standalone?.check(msg.token)) return fail('Enter the tester password to play.');
     this.stopWatching(user);
     user.room = null;
     this.closeInvitesOf(user, 'unavailable');
@@ -128,9 +138,25 @@ export class Lobby {
     };
   }
 
-  // `address` is where the connection comes from, for the feedback limits.
-  connect(ws, address = null) {
-    const conn = { ws, user: null, address };
+  // Whether a connection is told about a game at all: a game with a private
+  // build exists only while that build is there.
+  canSee(conn, id) {
+    return this.games.has(id) && (this.localGames[id]?.available() ?? true);
+  }
+
+  // The tester password changed: end every session that needed it (a private
+  // build played on the server's own machine did not).
+  endPasswordSessions(message) {
+    for (const user of this.users.values()) {
+      if (user.solo && !(this.localGames[user.solo] && user.conn?.local)) this.stopSolo(user, message);
+    }
+  }
+
+  // `address` is where the connection comes from, for the feedback limits;
+  // `local` is true for a direct connection from this machine (LocalGame.isLocal);
+  // it lets this machine play a private build without the password.
+  connect(ws, address = null, local = false) {
+    const conn = { ws, user: null, address, local };
     this.stats?.connected();
     ws.on('message', (raw) => {
       let msg;
@@ -164,7 +190,12 @@ export class Lobby {
       // Playing the computer, which an invitation from a person may end.
       ...(againstBot(u) ? { vsBot: true } : {}),
     }));
-    for (const u of this.users.values()) this.send(u, { type: 'users', users });
+    // Someone who cannot see a game (its build is gone) sees its player as just busy.
+    const anyLocal = users.some((v) => v.game && this.localGames[v.game]);
+    for (const u of this.users.values()) {
+      const view = anyLocal ? users.map((v) => (v.game && !this.canSee(u.conn, v.game) ? { ...v, game: null } : v)) : users;
+      this.send(u, { type: 'users', users: view });
+    }
   }
 
   // The matches anyone may watch, each with a preview of how it stands now
@@ -274,7 +305,7 @@ export class Lobby {
       type: 'joined',
       name: user.name,
       token: user.token,
-      games: [...this.games.values()].map((g) => g.meta),
+      games: [...this.games.values()].filter((g) => this.canSee(conn, g.meta.id)).map((g) => g.meta),
       previewLimit: PREVIEW_LIMIT,
       // True when a match is about to be resent rather than started.
       resumed: Boolean(user.match),

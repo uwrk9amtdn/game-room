@@ -1,4 +1,6 @@
 // Password-protected standalone game assets. The game itself stays unchanged.
+// One tester password covers every protected game: Tape-Out here, and MK4 for
+// visitors who are not on the server's machine (server/local-game.js).
 import path from 'node:path';
 import { mkdir, rename, writeFile, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -7,7 +9,11 @@ import { hashPassword, readPasswordHash, verifyPassword, LoginGuard, Sessions } 
 import { origin } from './proxy.js';
 
 const BASE = '/solo/tape-out/';
+// Shared by all protected games; scoped to their common prefix.
+const COOKIE_PATH = '/solo/';
 const COOKIE = 'game_room_tape_out';
+// Unlock is accepted at the shared address and at Tape-Out's original one.
+export const UNLOCK = ['/solo/unlock', BASE + 'unlock'];
 
 export class StandaloneAccess {
   constructor({ dataDir, assetDir, proxy }) {
@@ -42,6 +48,15 @@ export class StandaloneAccess {
 
   check(token) { return Boolean(this.hash && this.sessions.check(token, this.hash)); }
 
+  // The session cookie a request carries, if any.
+  cookie(req) {
+    return (req.headers.cookie ?? '').split(';').map((s) => s.trim())
+      .find((s) => s.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
+  }
+
+  // Whether a request carries a valid tester session.
+  checkRequest(req) { return this.check(this.cookie(req)); }
+
   send(res, status, body, headers = {}) {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff', ...headers });
@@ -50,14 +65,14 @@ export class StandaloneAccess {
 
   async handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
-    if (url.pathname === BASE + 'unlock' && req.method === 'POST') {
+    if (UNLOCK.includes(url.pathname) && req.method === 'POST') {
       const from = origin(req, this.proxy);
       if (!from.https && !from.local) return this.send(res, 403, { error: 'Open the platform over HTTPS.' });
       if (!String(req.headers['content-type'] ?? '').startsWith('application/json') ||
           (req.headers.origin && req.headers.origin !== `${from.https ? 'https' : 'http'}://${req.headers.host}`)) {
         return this.send(res, 403, { error: 'Bad request.' });
       }
-      if (!this.hash) return this.send(res, 409, { error: 'Testing is locked until an admin sets the Tape-Out password.' });
+      if (!this.hash) return this.send(res, 409, { error: 'Playing is locked until an admin sets the tester password.' });
       const wait = this.guard.waitFor(from.address);
       if (wait) return this.send(res, 429, { error: `Too many attempts. Try again in ${Math.ceil(wait / 1000)} seconds.` },
         { 'Retry-After': String(Math.ceil(wait / 1000)) });
@@ -81,7 +96,7 @@ export class StandaloneAccess {
       this.guard.succeeded(from.address);
       const token = this.sessions.create(hash);
       return this.send(res, 200, { token }, {
-        'Set-Cookie': `${COOKIE}=${token}; Path=${BASE}; HttpOnly; SameSite=Strict;${from.local ? '' : ' Secure;'} Max-Age=43200`,
+        'Set-Cookie': `${COOKIE}=${token}; Path=${COOKIE_PATH}; HttpOnly; SameSite=Strict;${from.local ? '' : ' Secure;'} Max-Age=43200`,
       });
     }
 
@@ -94,9 +109,7 @@ export class StandaloneAccess {
         !(relative === 'index.html' || /^audio\/[a-zA-Z0-9_-]+\.mp3$/.test(relative))) {
       return this.send(res, 404, { error: 'Not found.' });
     }
-    const token = (req.headers.cookie ?? '').split(';').map((s) => s.trim())
-      .find((s) => s.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
-    if (!this.check(token)) return this.send(res, 401, { error: 'Enter the tester password through the game page.' });
+    if (!this.checkRequest(req)) return this.send(res, 401, { error: 'Enter the tester password through the game page.' });
     const file = path.join(this.assetDir, relative);
     let size;
     try { size = (await stat(file)).size; }
