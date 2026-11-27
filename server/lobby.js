@@ -32,8 +32,9 @@ export class Lobby {
   // `limits` holds per-game overrides
   // passed to validateOptions, keyed by game id; with `graceMs` it lets tests
   // run short games.
-  // `standalone` protects Tape-Out; `localGames` maps the id of each
-  // `meta.localOnly` game to its LocalGame (server/local-game.js).
+  // `standalone` holds the tester password for protected single-player games;
+  // `localGames` maps a game id to its LocalGame (server/local-game.js), a
+  // private build that may be absent.
   constructor({ games, archive = new Archive(), stats = null, feedback = null, limits = {}, graceMs = 30_000, standalone = null,
     localGames = {} }) {
     this.games = games;
@@ -56,13 +57,14 @@ export class Lobby {
   startSolo(user, msg) {
     const fail = (message) => this.send(user, { type: 'soloError', message });
     const game = this.games.get(msg.game);
-    const local = Boolean(game?.meta.localOnly);
-    if (!game?.meta.singlePlayer || (msg.game !== 'tape-out' && !local) || !this.canSee(user.conn, msg.game)) {
+    const built = Boolean(this.localGames[msg.game]);
+    if (!game?.meta.singlePlayer || (msg.game !== 'tape-out' && !built) || !this.canSee(user.conn, msg.game)) {
       return fail('Unknown single-player game.');
     }
     if (user.match || user.solo) return fail('You are already in a game.');
     if (this.restart) return fail(PAUSED);
-    if (!local && !this.standalone?.check(msg.token)) return fail('Enter the tester password to play.');
+    // On the server's own machine a private build needs no password.
+    if (!(built && user.conn?.local) && !this.standalone?.check(msg.token)) return fail('Enter the tester password to play.');
     this.stopWatching(user);
     user.room = null;
     this.closeInvitesOf(user, 'unavailable');
@@ -136,15 +138,23 @@ export class Lobby {
     };
   }
 
-  // Whether a connection is told about a game at all: a local-only game
-  // exists only for connections from this machine while its build is there.
+  // Whether a connection is told about a game at all: a game with a private
+  // build exists only while that build is there.
   canSee(conn, id) {
-    if (!this.games.get(id)?.meta.localOnly) return this.games.has(id);
-    return Boolean(conn?.local && this.localGames[id]?.available());
+    return this.games.has(id) && (this.localGames[id]?.available() ?? true);
+  }
+
+  // The tester password changed: end every session that needed it (a private
+  // build played on the server's own machine did not).
+  endPasswordSessions(message) {
+    for (const user of this.users.values()) {
+      if (user.solo && !(this.localGames[user.solo] && user.conn?.local)) this.stopSolo(user, message);
+    }
   }
 
   // `address` is where the connection comes from, for the feedback limits;
-  // `local` is true for a direct connection from this machine (LocalGame.isLocal).
+  // `local` is true for a direct connection from this machine (LocalGame.isLocal);
+  // it lets this machine play a private build without the password.
   connect(ws, address = null, local = false) {
     const conn = { ws, user: null, address, local };
     this.stats?.connected();
@@ -180,8 +190,8 @@ export class Lobby {
       // Playing the computer, which an invitation from a person may end.
       ...(againstBot(u) ? { vsBot: true } : {}),
     }));
-    // Someone who cannot see a local-only game sees its player as just busy.
-    const anyLocal = users.some((v) => v.game && this.games.get(v.game)?.meta.localOnly);
+    // Someone who cannot see a game (its build is gone) sees its player as just busy.
+    const anyLocal = users.some((v) => v.game && this.localGames[v.game]);
     for (const u of this.users.values()) {
       const view = anyLocal ? users.map((v) => (v.game && !this.canSee(u.conn, v.game) ? { ...v, game: null } : v)) : users;
       this.send(u, { type: 'users', users: view });

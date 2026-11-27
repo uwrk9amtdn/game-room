@@ -201,3 +201,46 @@
 
 **Next steps**
 - User acceptance of MK4 single-player inside Game Room.
+
+## 2026-11-27 12:00 +03:00 — MK4 for remote players behind the tester password
+
+**Changes made**
+- MK4 is listed to everyone while `mk4-build/` exists; remote visitors unlock it
+  with the tester password (the same as Tape-Out's). The server's own machine
+  still plays without a password. Replaces the localhost-only rule.
+- `server/standalone.js`: session cookie scoped to `/solo/` (was
+  `/solo/tape-out/`), shared unlock address `/solo/unlock` (old address kept),
+  `cookie(req)`/`checkRequest(req)`.
+- `server/local-game.js`: `allowed(req)` = local or valid tester session; 401
+  without access; `/solo/mk4/access` answers `{ local }` for the game page.
+- Lobby: `canSee` = game present and its build (if any) available; `soloStart`
+  for MK4 needs the token unless the connection is local;
+  `endPasswordSessions` (used by the admin password change) leaves local MK4
+  play running.
+- `public/js/kit/unlock.js`: shared password form; Tape-Out and MK4 clients use
+  it. MK4 shows Play locally, the form elsewhere. `meta.localOnly` removed.
+- Admin: section renamed "Tester access (Tape-Out, MK4)".
+- `mk4-build/` now holds real copies (no symlinks), so it can be copied to the
+  server; still Git-ignored.
+
+**How it works**
+- The user chose the shared tester password over separate MK4 access.
+- Rejected: serving MK4 to every visitor without a password (public
+  distribution of the game's files).
+
+**Testing**
+- `npm test`: 318/318. `test/local-game.test.js` rewritten: hidden without a
+  build; local access and Play without password; remote 401, 409 before a
+  password is set, wrong password 401, plain HTTP 403, unlock sets
+  `Path=/solo/; Secure`, then files served; lobby refuses null/forged tokens and
+  accepts the real one; password rotation ends the remote session and its file
+  access but not local play; removing the build hides the game. The Tape-Out
+  test passes unchanged.
+- Chromium against the real build (`tools/check-game-room.py` in mk4-port),
+  20/20: local flow as before, plus a remote visitor (non-loopback host name)
+  sees the password form, gets 401 before unlocking, wrong password refused,
+  plays after unlocking.
+- Not tested: on the deployed server behind the real proxy.
+
+**Next steps**
+- Copy `mk4-build/` to the server and check a remote launch there.

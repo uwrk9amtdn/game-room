@@ -35,8 +35,8 @@ Tape-Out uses a separate protected single-player session with `players: 1` and
 `singlePlayer: true`. It does not implement the multiplayer match contract below.
 See [standalone hosting](../doc/standalone-games.md) for its launch flow and access control.
 A standalone game names the page the platform embeds in `meta.solo`.
-`localOnly: true` (MK4) lists a game only to visitors on the server's own
-machine while its private build is present (see the same document).
+MK4 is listed only while its private build is present; the tester password
+unlocks it too, except on the server's own machine (see the same document).
 
 ## `server/index.js`
 

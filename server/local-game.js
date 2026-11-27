@@ -1,8 +1,8 @@
-// A private single-player game served only to this machine (MK4). Its build is
-// exported into an ignored directory with a manifest.json; only the files the
-// manifest names are served, and only to requests that reach the server
-// directly from loopback with a loopback Host. Behind the HTTPS proxy, or from
-// any other address, the game does not exist.
+// A private single-player game built from the owner's files (MK4). Its build
+// is exported into an ignored directory with a manifest.json; only the files
+// the manifest names are served. On the server's own machine (direct loopback
+// request, loopback Host) no password is needed; everyone else needs the
+// tester password (StandaloneAccess), like Tape-Out.
 import path from 'node:path';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -19,8 +19,9 @@ const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
 export const loopbackHost = (host) => LOOPBACK_HOST.test(String(host ?? ''));
 
 export class LocalGame {
-  constructor({ id, dir, proxy }) {
+  constructor({ id, dir, proxy, access = null }) {
     this.id = id;
+    this.access = access;
     this.base = `/solo/${id}/`;
     this.dir = dir;
     this.proxy = proxy;
@@ -45,19 +46,29 @@ export class LocalGame {
   // A request (or WebSocket upgrade) from this machine, not relayed by the proxy.
   isLocal(req) { return origin(req, this.proxy).local && loopbackHost(req.headers.host); }
 
+  allowed(req) { return this.isLocal(req) || Boolean(this.access?.checkRequest(req)); }
+
   async handle(req, res) {
     const notFound = () => {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end('Not found');
     };
-    // Same answer whether the build is missing, the file is unlisted or the
-    // visitor is remote: nothing reveals that the game is installed here.
-    if (!this.isLocal(req) || !['GET', 'HEAD'].includes(req.method)) return notFound();
+    if (!['GET', 'HEAD'].includes(req.method)) return notFound();
     const manifest = await this.refresh();
     let name;
     try { name = decodeURIComponent(new URL(req.url, 'http://localhost').pathname.slice(this.base.length)); }
     catch { return notFound(); }
-    if (!manifest || !Object.hasOwn(manifest.files, name) || name === 'manifest.json') return notFound();
+    if (!manifest) return notFound();
+    // Tells the game page whether to ask for the password. Reveals nothing else.
+    if (name === 'access') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify({ local: this.isLocal(req) }));
+    }
+    if (!this.allowed(req)) {
+      res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('Enter the tester password through the game page.');
+    }
+    if (!Object.hasOwn(manifest.files, name) || name === 'manifest.json') return notFound();
     const file = path.join(this.dir, name);
     let info;
     try { info = await stat(file); }

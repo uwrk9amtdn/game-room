@@ -17,7 +17,7 @@ import { Stats } from './stats.js';
 import { createPanel } from './panel.js';
 import { FeedbackBox } from './feedback.js';
 import { origin, proxySettings } from './proxy.js';
-import { StandaloneAccess } from './standalone.js';
+import { StandaloneAccess, UNLOCK } from './standalone.js';
 import { LocalGame } from './local-game.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -163,7 +163,7 @@ export async function startServer({
   const proxy = proxySettings(panelOptions);
   const standalone = new StandaloneAccess({ dataDir, assetDir: tapeOutDir, proxy });
   await standalone.load();
-  const mk4 = new LocalGame({ id: 'mk4', dir: mk4Dir, proxy });
+  const mk4 = new LocalGame({ id: 'mk4', dir: mk4Dir, proxy, access: standalone });
   await mk4.refresh();
   // A new export (or its removal) shows in the game list without a restart.
   const watchMk4 = setInterval(() => mk4.refresh(), 5000).unref();
@@ -179,7 +179,7 @@ export async function startServer({
         if (!res.headersSent) res.writeHead(500).end();
         else res.destroy();
       });
-    } else if (req.url.startsWith('/solo/tape-out/')) {
+    } else if (req.url.startsWith('/solo/tape-out/') || UNLOCK.some((p) => req.url.split('?')[0] === p)) {
       standalone.handle(req, res).catch((err) => {
         console.error('Error serving standalone game:', err);
         stats.error();

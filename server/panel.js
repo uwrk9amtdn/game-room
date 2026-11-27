@@ -193,7 +193,7 @@ export function createPanel({
         return send(res, 400, { error: 'Use a tester password of 5 to 256 characters.' });
       }
       await standalone.setPassword(body.password);
-      for (const user of lobby.users.values()) if (user.solo) lobby.stopSolo(user, 'The tester password changed. Enter the new password to continue.');
+      lobby.endPasswordSessions('The tester password changed. Enter the new password to continue.');
       log('changed Tape-Out tester password', from);
       return send(res, 200, { ok: true, ...standalone.settings() });
     }
