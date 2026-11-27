@@ -244,3 +244,34 @@
 
 **Next steps**
 - Copy `mk4-build/` to the server and check a remote launch there.
+
+## 2026-11-27 13:10 +03:00 — MK4 online 1v1 matches
+
+**Features implemented**
+- MK4 is a two-player game with invitations (`players: 2`) and keeps its
+  single-player launch. The inviter picks the input delay (2-8 frames, default 4).
+- `games/mk4/server/match.js` (`Mk4Match`): ready handshake with a shared
+  server seed; ordered input relay (`from` must continue the sequence, words
+  ≤ 24 bits, batches ≤ 64, lead ≤ 2 × delay + 64, `ack` trims resends); state
+  hashes every 60 ticks, mismatch → `desync`; `leave`, `abandoned`; snapshots
+  with `moves: []` (never archived); no inputs or seed for spectators.
+- `games/mk4/client/index.js`: invite form, results, match view (frame with
+  `?net=1`, postMessage relay, password form when needed, Leave match,
+  Fullscreen, status line; refuses to rejoin after a reload).
+
+**Changes made**
+- Lobby: solo launch requires `meta.solo` (not `singlePlayer`); invitations
+  and play-the-computer refuse games whose build is missing; user list entries
+  carry `solo: true` so solo players show as "playing".
+
+**Testing**
+- `npm test` 324/324: new `games/mk4/test/match.test.js` (options, start,
+  seeds, input validation and trimming, lead limit, hashes and desync, leave,
+  abandon) and an online lobby test (no invite without a build; invite, accept,
+  ready, relay, no solo launch mid-match, leave frees both).
+- mk4-port `tools/check-game-room-online.py`: two Chromium players, 3,049
+  ticks, hashes verified to 3,000, leave and close. Single-player check 20/20.
+- Not tested: real network, second machine, gamepads.
+
+**Next steps**
+- Test with a second machine over the deployed server.

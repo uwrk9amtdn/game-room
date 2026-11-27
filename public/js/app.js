@@ -607,7 +607,7 @@ function renderUsers() {
   const sorted = [...users].sort((a, b) => (b.name === me) - (a.name === me) || a.name.localeCompare(b.name));
   $('userCount').textContent = users.length;
   $('users').replaceChildren(...sorted.map((u) => {
-    const doing = u.vsBot ? 'playing the computer' : games.get(u.game)?.singlePlayer ? 'playing' : u.status;
+    const doing = u.vsBot ? 'playing the computer' : u.solo || games.get(u.game)?.singlePlayer ? 'playing' : u.status;
     let status = u.game && games.has(u.game) ? `${doing} · ${games.get(u.game).name}` : doing;
     if (u.name === me) status = `you · ${status}`;
     const li = el('li', {},

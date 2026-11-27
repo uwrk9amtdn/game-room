@@ -126,6 +126,18 @@ committed here.
   disposes the engine on teardown. The platform's Fullscreen button returns
   keyboard focus to the frame.
 - **Shared form:** `public/js/kit/unlock.js` is the password form both games use.
+- **Online 1v1:** MK4 is also an ordinary two-player match game (`players: 2`;
+  single player stays the standalone launch, keyed on `meta.solo`). Invite a
+  player from the list on its page; the inviter picks the input delay. The
+  server (`games/mk4/server/match.js`) only relays inputs in order with a lead
+  limit, compares state hashes every 60 ticks (mismatch ends the match), and
+  never archives a match; spectators see a notice. The view
+  (`games/mk4/client/index.js`) embeds the frame with `?net=1`, shows the
+  password form if this browser has no access yet, and offers Leave match and
+  Fullscreen. Lockstep details live in mk4-port's
+  `doc/game-room-integration.md`. Tests: `games/mk4/test/match.test.js`, the
+  online case in `test/local-game.test.js`, and mk4-port's
+  `tools/check-game-room-online.py` (two Chromium players).
 - **Tests:** `test/local-game.test.js` uses a synthetic build (listing, local
   access, password, proxy headers, rotation, removal). The real build is checked
   with `tools/check-game-room.py` in `mk4-port` (Chromium, local and remote

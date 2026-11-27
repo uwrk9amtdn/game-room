@@ -58,7 +58,8 @@ export class Lobby {
     const fail = (message) => this.send(user, { type: 'soloError', message });
     const game = this.games.get(msg.game);
     const built = Boolean(this.localGames[msg.game]);
-    if (!game?.meta.singlePlayer || (msg.game !== 'tape-out' && !built) || !this.canSee(user.conn, msg.game)) {
+    // A game with a standalone page (`meta.solo`); MK4 also has online matches.
+    if (!game?.meta.solo || (msg.game !== 'tape-out' && !built) || !this.canSee(user.conn, msg.game)) {
       return fail('Unknown single-player game.');
     }
     if (user.match || user.solo) return fail('You are already in a game.');
@@ -187,6 +188,7 @@ export class Lobby {
       name: u.name,
       status: u.match || u.solo ? 'busy' : 'idle',
       game: u.match ? u.gameId : u.solo ?? null,
+      ...(u.solo ? { solo: true } : {}),
       // Playing the computer, which an invitation from a person may end.
       ...(againstBot(u) ? { vsBot: true } : {}),
     }));
@@ -351,7 +353,7 @@ export class Lobby {
     const fail = (message) => this.send(from, { type: 'error', message });
     const to = this.users.get(String(msg.to ?? '').toLowerCase());
     const game = typeof msg.game === 'string' ? this.games.get(msg.game) : undefined;
-    if (!game) return fail('Unknown game.');
+    if (!game || !this.canSee(from.conn, game.meta.id)) return fail('Unknown game.');
     if (game.meta.singlePlayer) return fail('Use the single-player launch button for this game.');
     if (!to || to === from) return fail('That player is not available.');
     if (this.restart) return fail(PAUSED);
@@ -418,7 +420,7 @@ export class Lobby {
   playBot(user, msg) {
     const fail = (message) => this.send(user, { type: 'error', message });
     const game = typeof msg.game === 'string' ? this.games.get(msg.game) : undefined;
-    if (!game) return fail('Unknown game.');
+    if (!game || !this.canSee(user.conn, game.meta.id)) return fail('Unknown game.');
     if (game.meta.singlePlayer) return fail('Use the single-player launch button for this game.');
     if (!game.validateBot) return fail('This game cannot be played against the computer.');
     if (this.restart) return fail(PAUSED);

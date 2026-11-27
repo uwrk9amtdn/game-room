@@ -159,3 +159,53 @@ test('MK4: listed while built; local play without a password, remote play with t
   bob.close();
   late.close();
 });
+
+test('MK4 online: invite, accept, ready, relay inputs, leave; not offered without a build', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'game-room-mk4-net-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const gamesDir = path.join(dir, 'games');
+  await cp(fileURLToPath(new URL('./fixtures/games', import.meta.url)), gamesDir, { recursive: true });
+  await cp(fileURLToPath(new URL('../games/mk4', import.meta.url)), path.join(gamesDir, 'mk4'), { recursive: true });
+  const mk4Dir = path.join(dir, 'mk4-build');
+  const server = await startServer({ port: 0, gamesDir, mk4Dir, tapeOutDir: path.join(dir, 'none') });
+  t.after(() => server.close());
+  const ann = connect(server.port), bob = connect(server.port);
+  await Promise.all([ann.opened, bob.opened]);
+  ann.send({ type: 'join', name: 'ann' });
+  bob.send({ type: 'join', name: 'bob' });
+  await Promise.all([ann.next('joined'), bob.next('joined')]);
+  ann.send({ type: 'invite', to: 'bob', game: 'mk4', options: { delay: 3 } });
+  assert.match((await ann.next('error')).message, /Unknown game/); // no build yet
+
+  await mkdir(mk4Dir, { recursive: true });
+  await writeFile(path.join(mk4Dir, 'index.html'), 'x');
+  await writeFile(path.join(mk4Dir, 'manifest.json'), JSON.stringify({ build: 'b', files: { 'index.html': { size: 1 } } }));
+  for (let i = 0; i < 80 && (await get(server.port, '/solo/mk4/access', { Host: `localhost:${server.port}` })).status !== 200; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  ann.send({ type: 'invite', to: 'bob', game: 'mk4', options: { delay: 3 } });
+  const invite = await bob.next('invite');
+  assert.deepEqual(invite.options, { delay: 3 });
+  bob.send({ type: 'accept', id: invite.id });
+  const first = await ann.next('match');
+  assert.equal(first.snapshot.started, false);
+  const annSeat = first.snapshot.you;
+  const bobSeat = 1 - annSeat;
+  ann.send({ type: 'action', action: 'ready' });
+  bob.send({ type: 'action', action: 'ready' });
+  const started = await ann.next('match', (m) => m.snapshot.started);
+  assert.equal(started.snapshot.options.delay, 3);
+  ann.send({ type: 'action', action: 'input', from: 0, masks: [0, 0, 0, 5], ack: 0 });
+  const relayed = await bob.next('match', (m) => m.snapshot.remote.masks.length === 4);
+  assert.deepEqual(relayed.snapshot.remote, { from: 0, masks: [0, 0, 0, 5] });
+  assert.equal(relayed.snapshot.you, bobSeat);
+  // In a match: no solo launch, no other invitations.
+  ann.send({ type: 'soloStart', game: 'mk4', token: null });
+  assert.match((await ann.next('soloError')).message, /already in a game/);
+  bob.send({ type: 'action', action: 'leave' });
+  const over = await ann.next('match', (m) => m.snapshot.over);
+  assert.deepEqual(over.snapshot.over, { reason: 'left', seat: bobSeat });
+  await ann.next('users', (m) => m.users.every((u) => u.status === 'idle'));
+  ann.close();
+  bob.close();
+});
