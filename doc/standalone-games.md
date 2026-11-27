@@ -134,7 +134,10 @@ committed here.
   never archives a match; spectators see a notice. The view
   (`games/mk4/client/index.js`) embeds the frame with `?net=1`, shows the
   password form if this browser has no access yet, and offers Leave match and
-  Fullscreen. Lockstep details live in mk4-port's
+  Fullscreen. It tells each player their side and that Player 2 must join in
+  on the game's "1 on 1 / 2 on 2" screen, and shows a network readout (round
+  trip from the snapshot's `remote.acked`, share of frames waited, suggested
+  delay; delays 2-12 frames). Lockstep details live in mk4-port's
   `doc/game-room-integration.md`. Tests: `games/mk4/test/match.test.js`, the
   online case in `test/local-game.test.js`, and mk4-port's
   `tools/check-game-room-online.py` (two Chromium players).

@@ -275,3 +275,27 @@
 
 **Next steps**
 - Test with a second machine over the deployed server.
+
+## 2026-11-27 13:20 +03:00 — MK4 online: side/join guide and network readout
+
+**Changes made**
+- After the first user test (Player 2 had no fighter; the game slowed down): the MK4 match
+  view tells each player their side and that Player 2 must join in on the game's
+  "1 on 1 / 2 on 2" screen; a network readout shows the round trip, the share of frames
+  spent waiting and a suggested delay. Input delays 10 and 12 frames added.
+- `Mk4Match.snapshot(seat).remote.acked`: how many of this seat's ticks the other browser
+  has received (the frame measures the round trip from it).
+
+**How it works**
+- Key routing was already correct (each player's keys drive their own fighter); MK4 itself
+  needs Player 2 to join in. Lockstep slows both games whenever the round trip exceeds about
+  2 × delay frames less one frame; details and remedies (rollback) in mk4-port's
+  `doc/multiplayer-design.md`.
+
+**Testing**
+- `npm test` 324/324 (match and lobby tests expect `acked`). mk4-port's online check: Player 2
+  joins through their own keys (PLAYER 2 READY on screen), readout shown, hashes verified.
+- Not tested over a real network.
+
+**Next steps**
+- Second user test with the readout; then decide on rollback.

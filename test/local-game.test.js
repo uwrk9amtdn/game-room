@@ -197,7 +197,7 @@ test('MK4 online: invite, accept, ready, relay inputs, leave; not offered withou
   assert.equal(started.snapshot.options.delay, 3);
   ann.send({ type: 'action', action: 'input', from: 0, masks: [0, 0, 0, 5], ack: 0 });
   const relayed = await bob.next('match', (m) => m.snapshot.remote.masks.length === 4);
-  assert.deepEqual(relayed.snapshot.remote, { from: 0, masks: [0, 0, 0, 5] });
+  assert.deepEqual(relayed.snapshot.remote, { from: 0, masks: [0, 0, 0, 5], acked: 0 });
   assert.equal(relayed.snapshot.you, bobSeat);
   // In a match: no solo launch, no other invitations.
   ann.send({ type: 'soloStart', game: 'mk4', token: null });

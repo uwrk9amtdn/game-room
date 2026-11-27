@@ -37,7 +37,7 @@ test('inputs: ordered, bounded, relayed until acknowledged', () => {
   match.handle(0, { action: 'ready' });
   match.handle(1, { action: 'ready' });
   assert.equal(match.handle(0, { action: 'input', from: 0, masks: [1, 2, 3], ack: 0 }), null);
-  assert.deepEqual(match.snapshot(1).remote, { from: 0, masks: [1, 2, 3] });
+  assert.deepEqual(match.snapshot(1).remote, { from: 0, masks: [1, 2, 3], acked: 0 });
   assert.equal(match.snapshot(0).sent, 3);
   // Out of order, malformed, oversized, or a bad acknowledgement.
   for (const bad of [
@@ -47,8 +47,8 @@ test('inputs: ordered, bounded, relayed until acknowledged', () => {
   ]) assert.equal(match.handle(0, { action: 'input', ...bad }), 'Bad input.', JSON.stringify(bad));
   // Bob acknowledges two of ann's ticks: only the rest is resent to him.
   assert.equal(match.handle(1, { action: 'input', from: 0, masks: [9, 9], ack: 2 }), null);
-  assert.deepEqual(match.snapshot(1).remote, { from: 2, masks: [3] });
-  assert.deepEqual(match.snapshot(0).remote, { from: 0, masks: [9, 9] });
+  assert.deepEqual(match.snapshot(1).remote, { from: 2, masks: [3], acked: 0 });
+  assert.deepEqual(match.snapshot(0).remote, { from: 0, masks: [9, 9], acked: 2 });
   // Nobody runs further ahead than the lead allows.
   let from = 3;
   while (match.handle(0, { action: 'input', from, masks: zeros(MAX_BATCH), ack: 0 }) === null) from += MAX_BATCH;

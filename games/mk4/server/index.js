@@ -1,7 +1,7 @@
 import meta from '../meta.js';
 import { Mk4Match } from './match.js';
 
-export const DELAYS = [2, 3, 4, 5, 6, 8];
+export const DELAYS = [2, 3, 4, 5, 6, 8, 10, 12];
 
 // Online 1v1 is an ordinary match (input relay); single player is the
 // standalone session in server/local-game.js.

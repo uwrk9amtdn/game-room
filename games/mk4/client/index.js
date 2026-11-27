@@ -3,7 +3,7 @@ import { unlockForm } from '/js/kit/unlock.js';
 
 const HELP = 'Fights against the computer. Keyboard or gamepad; open Controls in the game for the keys. ' +
   'Fullscreen is beside Exit game; Escape leaves it. The game pauses when you click outside it.';
-const DELAYS = [2, 3, 4, 5, 6, 8];
+const DELAYS = [2, 3, 4, 5, 6, 8, 10, 12];
 const FRAME = '/solo/mk4/index.html?net=1';
 
 // Whether this browser may load the game files: on the server's machine, or
@@ -27,6 +27,12 @@ function inviteForm(container, submit) {
   container.append(label, hint, button);
 }
 
+// The smallest offered delay whose round-trip budget (two delays, less a frame
+// of scheduling) covers the measured round trip.
+function suggestDelay(rtt) {
+  return DELAYS.find((d) => 2 * d * 1000 / 60 - 17 >= rtt * 1.2) ?? DELAYS[DELAYS.length - 1];
+}
+
 function describeOptions(options) { return `Online · delay ${options.delay}`; }
 
 function describeResult({ players, over }) {
@@ -42,8 +48,10 @@ function describeResult({ players, over }) {
 // frame and the server.
 function mount(container, ctx) {
   const status = el('p', { className: 'mk4Status', role: 'status' });
+  const guide = el('p', { className: 'hint mk4Guide', hidden: true });
+  const network = el('p', { className: 'hint mk4Network', hidden: true });
   const host = el('div', { className: 'mk4Host' });
-  container.append(status, host);
+  container.append(status, guide, network, host);
   const leave = el('button', { textContent: 'Leave match' });
   const fullscreen = el('button', { textContent: 'Fullscreen', hidden: !document.fullscreenEnabled });
   ctx.toolbar.append(fullscreen, leave);
@@ -55,6 +63,7 @@ function mount(container, ctx) {
   let stalled = false;
   let snapshot = null;
   let readySent = false;
+  let stats = null;
 
   const post = (msg) => frame?.contentWindow?.postMessage(msg, location.origin);
   const say = (text) => { status.textContent = text; };
@@ -65,13 +74,33 @@ function mount(container, ctx) {
     // The last tick whose state hashes both browsers sent and the server found equal.
     container.dataset.verified = String(snapshot.verified);
     leave.hidden = Boolean(over) || you === null;
-    if (over) return say(`Match over: ${describeResult({ players, over })}.`);
+    if (over) { guide.hidden = true; return say(`Match over: ${describeResult({ players, over })}.`); }
     if (you === null) return say('Watching is not available for online MK4 matches.');
     if (failed) return say('The game stopped on this side. Leave the match to free both players.');
     const rival = players[1 - you];
     if (!connected[1 - you]) return say(`${rival} lost the connection. Waiting for them to come back…`);
     if (!started) return say(ready[1 - you] ? 'Loading the game…' : `Waiting for ${rival} to load the game…`);
     say(stalled ? `Waiting for ${rival}…` : `Online match against ${rival}. Input delay ${snapshot.options.delay} frames.`);
+    // Your keys always drive your own fighter; the game only needs Player 2 to join in.
+    guide.hidden = false;
+    guide.textContent = you === 0
+      ? `You are Player 1 (left side). Choose a mode, then wait on the "1 on 1 / 2 on 2" screen until it shows ` +
+        `PLAYER 2 READY before you pick, or ${rival} will not get a fighter.`
+      : `You are Player 2 (right side). Your keys move the right-hand fighter. When the "1 on 1 / 2 on 2" screen ` +
+        'shows PLAYER 2 JOIN IN, press a punch or kick key to join.';
+    renderNetwork();
+  }
+
+  // The full round trip must fit in twice the input delay, or the game waits.
+  function renderNetwork() {
+    if (!stats || stats.rtt === null) return;
+    const budget = Math.round(2 * stats.delay * 1000 / 60);
+    const waited = Math.round(stats.waited * 100);
+    const advice = stats.rtt > budget - 17 || waited > 5
+      ? ` Too slow for ${stats.delay} frames of delay: invite again with ${suggestDelay(stats.rtt)} frames.` : '';
+    network.hidden = false;
+    network.textContent = `Network: round trip ${stats.rtt} ms (fits up to about ${budget - 17} ms), ` +
+      `waited ${waited}% of the last second.${advice}`;
   }
 
   function openFrame() {
@@ -93,6 +122,9 @@ function mount(container, ctx) {
     } else if (msg.type === 'stall') {
       stalled = msg.stalled;
       render();
+    } else if (msg.type === 'stats') {
+      stats = msg;
+      renderNetwork();
     } else if (msg.type === 'error') {
       failed = true;
       render();
@@ -111,7 +143,7 @@ function mount(container, ctx) {
       started = true;
       post({ type: 'start', seat: snapshot.you, seed: snapshot.seed, delay: snapshot.options.delay });
     }
-    if (started && snapshot.remote.masks.length) post({ type: 'remote', ...snapshot.remote });
+    if (started) post({ type: 'remote', ...snapshot.remote });
   }
 
   let first = true;

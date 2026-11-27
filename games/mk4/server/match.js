@@ -118,7 +118,9 @@ export class Mk4Match {
       // Where this seat's own sequence stands: a fresh page after a reload
       // sees that it cannot rejoin a match already under way.
       sent: seat === null ? null : this.next[seat],
-      remote: seat === null ? null : { from: this.base[other], masks: this.inputs[other] },
+      // `acked`: how many of this seat's ticks the other browser has received
+      // (it measures the round trip).
+      remote: seat === null ? null : { from: this.base[other], masks: this.inputs[other], acked: this.base[seat] },
       verified: this.lastHash,
       // Never archived: a replay would need every input, which is not kept.
       moves: [],
