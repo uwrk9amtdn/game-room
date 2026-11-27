@@ -1,8 +1,9 @@
 import WebSocket from 'ws';
 
 // A WebSocket client that lets a test wait for the next message it cares about.
-export function connect(port) {
-  const ws = new WebSocket(`ws://localhost:${port}`);
+// `options` go to the WebSocket (e.g. { headers } to pose as a proxied visitor).
+export function connect(port, options = {}) {
+  const ws = new WebSocket(`ws://localhost:${port}`, options);
   const queue = [];
   let waiter = null;
   const pump = () => {

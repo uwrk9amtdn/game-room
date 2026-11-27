@@ -10,6 +10,8 @@ lobby and buildless browser JavaScript. Games provide server/client modules.
 - `games/`: discoverable game plugins; [contract](games/README.md).
 - `tape-out-beta-2/`: Git-ignored private build, copied separately to the server
   repo root; only HTML/audio served. Hosting: `server/standalone.js`.
+- `mk4-build/`: Git-ignored MK4 build exported by `mk4-port` (`tools/export-game-room.mjs`
+  there); served only locally by `server/local-game.js`.
 - `test/`: platform tests and fixtures; game tests live in `games/*/test/`.
 - `deploy/`, `DEPLOY.md`: existing deployment tooling and server setup.
 - `data/`, `node_modules/`: ignored runtime data and dependencies.
@@ -33,14 +35,16 @@ lobby and buildless browser JavaScript. Games provide server/client modules.
 - Deployment uses FreeBSD `daemon(8)` or a Linux nohup supervisor; the same
   start/stop/restart commands manage both. `GAME_ROOM_STATE` isolates test state.
 - Mortal Kombat 4 is developed in its own repository at `/home/hd/Desktop/mk4-port`
-  (moved out 2026-11-26). Game Room will integrate its browser build later as a
-  `games/mk4` plugin with a local single-player session; plan in that repository.
+  (moved out 2026-11-26). `games/mk4` is a `localOnly` standalone game: listed,
+  launched and served only for direct loopback connections with a loopback Host while
+  `mk4-build/manifest.json` exists; no password. Plan in that repository.
+- Standalone games declare their embedded page in `meta.solo`.
 
 # Docs
 
 - Root references: [README.md](README.md), [DEPLOY.md](DEPLOY.md), [ANDROID.md](ANDROID.md).
 - [doc/standalone-games.md](doc/standalone-games.md): Tape-Out setup, protected
-  assets, password persistence, presence lifecycle and verification.
+  assets, password persistence, presence lifecycle and verification; MK4 local-only hosting.
 - [doc/plans/](doc/plans/): implementation checklists, including completed work.
 
 # Current work

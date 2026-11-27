@@ -5,4 +5,5 @@ export default {
   players: 1,
   icon: '▣',
   singlePlayer: true,
+  solo: '/solo/tape-out/index.html',
 };

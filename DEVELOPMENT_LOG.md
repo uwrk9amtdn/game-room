@@ -155,3 +155,49 @@
   context, shared cooldown, exit and password rotation. Mobile width remained
   within a 390-pixel viewport; no uncaught browser exceptions occurred.
 - JavaScript syntax checks and `git diff --check` passed.
+
+## 2026-11-27 11:05 +03:00 — Add MK4 as a local-only standalone game
+
+**Features implemented**
+- `games/mk4/`: Mortal Kombat 4 as a single-player standalone game, built from
+  the user's own files in the `mk4-port` repository and exported into the
+  ignored `mk4-build/`. Play button on the game page; the platform's
+  Fullscreen, Feedback and Exit game apply.
+- `server/local-game.js` (`LocalGame`): serves `/solo/mk4/<name>` for names in
+  `mk4-build/manifest.json` only, only to direct loopback requests with a
+  loopback `Host`; the same 404 for everything else. ETag + `private, no-cache`.
+
+**Changes made**
+- Lobby: `localGames` option, `canSee(conn, id)`; local-only games are left
+  out of the `joined` game list for other connections, `soloStart` accepts them
+  without a token for local connections, and the user list shows their players
+  as busy with `game: null` to anyone who cannot see the game.
+- `startServer({ mk4Dir })`, manifest re-read every 5 s (export/removal without
+  restart); WebSocket connections carry a `local` flag.
+- Standalone metadata: `meta.solo` names the embedded page (Tape-Out and MK4);
+  the iframe takes title from `meta.name` and allows `gamepad`.
+- Fullscreen button returns keyboard focus to the iframe.
+- `test/helpers.js` `connect(port, options)` passes WebSocket options (headers).
+
+**How it works**
+- Local check: `origin(req, proxy).local` (direct loopback, no trusted proxy
+  headers) plus `Host` matching localhost/127.0.0.1/[::1]. The Host rule blocks
+  DNS rebinding and a proxy that forwards without `X-Forwarded-For`.
+- Rejected: a Tape-Out-style password (would still send files derived from the
+  game to remote players; no redistribution); serving directly from
+  `mk4-port/private/` (couples repositories, serves whatever is there).
+
+**Testing**
+- `npm test`: 318/318, including new `test/local-game.test.js` (Host names;
+  hidden without build; listing/launch/serving only locally; 304; unlisted,
+  manifest, traversal and bad-escape paths 404; proxied and foreign-Host 404;
+  remote player sees "busy" with no game id; invitation blocked; re-launch).
+- Chromium against the real export (`tools/check-game-room.py` in mk4-port):
+  listed, loads in 0.3 s from cache, runs, pauses on outside click, mute via
+  the Sound key suspends engine audio, fullscreen focus, exit, fresh relaunch,
+  proxied request 404, no page errors.
+- Not tested: real gamepad, Firefox, the public deployment itself (the rule is
+  covered by the proxy-header tests).
+
+**Next steps**
+- User acceptance of MK4 single-player inside Game Room.
