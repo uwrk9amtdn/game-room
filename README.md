@@ -20,6 +20,7 @@ A small site for playing board games in the browser with other people, or agains
 - **Watching:** follow games in progress, or replay finished ones, from either side of the board.
 - **Looks:** five site themes (Light, Dark, Sepia, Midnight, and Glass, frosted over a choice of six pictures); for chess seven boards and nine piece sets, for Go, Gomoku and Mill seven boards, four kinds of stones and coordinates on or off, chosen from the ☰ menu.
 - **Feedback:** players send bugs and ideas from the ☰ menu, a message a minute at most, and the admin reads them in the panel.
+- **Tape-Out beta:** a standalone single-player game embedded in the platform, protected by a tester password set in the admin panel. Everyone sees its card and who is playing; invitations are blocked during play. Saves stay in the browser. See [setup and hosting](doc/standalone-games.md).
 - **Admin panel:** at `/admin`, behind a password, over HTTPS only and slowed against guessing: feedback, who is online, the games in progress, updates, statistics per day and per game, the server's health, and finished games to delete. See [DEPLOY.md](DEPLOY.md).
 - **Phones:** the layout works on phones, and the site can be installed as an app. See [ANDROID.md](ANDROID.md) for building an Android APK.
 
@@ -39,11 +40,11 @@ Two environment variables change the defaults:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `PORT` | `9494` | The port the server listens on. |
-| `DATA_DIR` | `data/` | Where finished matches are kept, one `<game>.jsonl` file per game. |
+| `DATA_DIR` | `data/` | Persistent runtime data, including finished matches and the Tape-Out tester password hash. |
 
 Everything else lives only in memory: players, invitations and matches in progress are lost when the server restarts. A player who drops out mid-game has 30 seconds to come back before the game counts them as gone.
 
-To keep it running on a FreeBSD server, without root, and have it update itself after every push, see [DEPLOY.md](DEPLOY.md).
+To keep it running on a FreeBSD or Linux server, without root, and have it update itself after every push, see [DEPLOY.md](DEPLOY.md).
 
 ## Tests
 
@@ -84,7 +85,7 @@ games/       one folder per game, found by the server at start-up
 test/        tests of the platform
 ```
 
-The browser is only a view. It opens a WebSocket to the server, sends what the player wants to do, and draws the snapshots the server sends back. The server is the only judge of what is legal.
+Multiplayer games use the browser as a view. It opens a WebSocket to the server, sends what the player wants to do, and draws the snapshots the server sends back. The server is the only judge of what is legal. Tape-Out runs entirely in its embedded browser page; the platform manages its access and player status.
 
 New games plug in without changing the platform. [games/README.md](games/README.md) explains the contract a game has to meet, with chess as the worked example.
 

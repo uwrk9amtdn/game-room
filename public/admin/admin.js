@@ -230,6 +230,9 @@ function table(target, headings, rows, caption = '') {
 
 async function loadOverview() {
   const o = await api('GET', 'overview');
+  $('tapeOutStatus').textContent = o.tapeOut?.passwordSet
+    ? 'A tester password is set.' : 'Locked: set a tester password to enable play.';
+  if (o.tapeOut && !o.tapeOut.persistent) $('tapeOutStatus').textContent += ' This server has no data directory; the password resets on restart.';
   games = o.games;
   const online = o.players.filter((p) => p.connected).length;
   const playing = o.players.filter((p) => p.game).length;
@@ -272,6 +275,22 @@ async function loadOverview() {
     select.append(...games.map((g) => el('option', { value: g.id, textContent: g.name })));
   }
 }
+
+// The tester password is independent of the admin password and is never read back.
+$('tapeOutPasswordForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('saveTapeOutPassword').disabled = true;
+  $('tapeOutMessage').textContent = '';
+  try {
+    await api('POST', 'tape-out/password', { password: $('tapeOutPassword').value });
+    $('tapeOutPassword').value = '';
+    $('tapeOutMessage').textContent = 'Tester password saved. Share the new password with testers.';
+    await loadOverview();
+  } catch (err) {
+    if (err instanceof LoggedOut) showLogin('Your session has ended. Log in again.');
+    else $('tapeOutMessage').textContent = err.message;
+  } finally { $('saveTapeOutPassword').disabled = false; }
+});
 
 async function update(action, question) {
   if (!confirm(question)) return;

@@ -347,7 +347,7 @@ main { padding: 16px; min-width: 0; }
 /* ---- game page ---- */
 
 #gamePage { display: grid; gap: 12px; }
-#gameHeader { display: flex; align-items: center; gap: 12px; min-height: 34px; }
+#gameHeader { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 34px; }
 #gameHeader h2 { font-size: 18px; color: var(--text); text-transform: none; letter-spacing: 0; }
 #backLink { color: var(--muted); text-decoration: none; }
 #backLink:hover { color: var(--text); }
@@ -413,4 +413,19 @@ dialog h2 { font-size: 18px; color: var(--text); text-transform: none; letter-sp
 /* A narrow screen has less room around the page. */
 @media (max-width: 860px) {
   main { padding: 10px; }
+}
+/* Standalone games retain their own layout and audio inside the site shell. */
+#multiplayerLists { display: grid; gap: 8px; }
+.standaloneGame {
+  display: block;
+  width: 100%;
+  height: calc(100dvh - 160px);
+  min-height: 420px;
+  border: 0;
+  background: var(--surface);
+}
+.standaloneGame:fullscreen {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }

@@ -32,8 +32,9 @@ export class Lobby {
   // `limits` holds per-game overrides
   // passed to validateOptions, keyed by game id; with `graceMs` it lets tests
   // run short games.
-  constructor({ games, archive = new Archive(), stats = null, feedback = null, limits = {}, graceMs = 30_000 }) {
+  constructor({ games, archive = new Archive(), stats = null, feedback = null, limits = {}, graceMs = 30_000, standalone = null }) {
     this.games = games;
+    this.standalone = standalone;
     this.archive = archive;
     this.stats = stats;
     this.feedback = feedback;
@@ -45,6 +46,28 @@ export class Lobby {
     // A restart for an update, once announced: { at }, the time it may
     // happen; it waits beyond that for the matches being played to end.
     this.restart = null;
+  }
+
+  // A standalone game has presence, but no opponent, spectators or archive.
+  startSolo(user, msg) {
+    const fail = (message) => this.send(user, { type: 'soloError', message });
+    if (msg.game !== 'tape-out' || !this.games.get(msg.game)?.meta.singlePlayer) return fail('Unknown single-player game.');
+    if (user.match || user.solo) return fail('You are already in a game.');
+    if (this.restart) return fail(PAUSED);
+    if (!this.standalone?.check(msg.token)) return fail('Enter the tester password to play.');
+    this.stopWatching(user);
+    user.room = null;
+    this.closeInvitesOf(user, 'unavailable');
+    user.solo = msg.game;
+    this.send(user, { type: 'soloStarted', game: user.solo });
+    this.broadcastUsers();
+  }
+
+  stopSolo(user, message = null) {
+    if (!user.solo) return;
+    user.solo = null;
+    this.send(user, { type: 'soloEnded', message });
+    this.broadcastUsers();
   }
 
   // ---- restarting for an update (see server/index.js and DEPLOY.md) ----
@@ -90,7 +113,7 @@ export class Lobby {
       players: [...this.users.values()].map((u) => ({
         name: u.name,
         connected: Boolean(u.conn),
-        game: u.match ? u.gameId : null,
+        game: u.match ? u.gameId : u.solo ?? null,
         watching: Boolean(u.watching),
       })),
       matches: [...this.matches.values()].map((m) => ({
@@ -136,8 +159,8 @@ export class Lobby {
   broadcastUsers() {
     const users = [...this.users.values()].map((u) => ({
       name: u.name,
-      status: u.match ? 'busy' : 'idle',
-      game: u.match ? u.gameId : null,
+      status: u.match || u.solo ? 'busy' : 'idle',
+      game: u.match ? u.gameId : u.solo ?? null,
       // Playing the computer, which an invitation from a person may end.
       ...(againstBot(u) ? { vsBot: true } : {}),
     }));
@@ -184,6 +207,8 @@ export class Lobby {
     const user = conn.user;
     if (!user) return;
     switch (msg.type) {
+      case 'soloStart': return this.startSolo(user, msg);
+      case 'soloStop': return this.stopSolo(user);
       case 'invite': return this.invite(user, msg);
       case 'cancel': return this.answerInvite(user, msg.id, 'cancelled');
       case 'decline': return this.answerInvite(user, msg.id, 'declined');
@@ -241,6 +266,8 @@ export class Lobby {
       this.stats?.onlineNow(this.users.size);
     }
     this.stats?.joined(user.name);
+    // Standalone screens are not resumed across connection replacement.
+    user.solo = null;
     user.conn = conn;
     conn.user = user;
     this.send(user, {
@@ -294,10 +321,11 @@ export class Lobby {
     const to = this.users.get(String(msg.to ?? '').toLowerCase());
     const game = typeof msg.game === 'string' ? this.games.get(msg.game) : undefined;
     if (!game) return fail('Unknown game.');
+    if (game.meta.singlePlayer) return fail('Use the single-player launch button for this game.');
     if (!to || to === from) return fail('That player is not available.');
     if (this.restart) return fail(PAUSED);
-    if (from.match) return fail('You are already in a game.');
-    if (to.match && !againstBot(to)) return fail(`${to.name} is busy.`);
+    if (from.match || from.solo) return fail('You are already in a game.');
+    if (to.solo || (to.match && !againstBot(to))) return fail(`${to.name} is busy.`);
     if ([...this.invites.values()].some((i) => i.from === from)) {
       return fail('You already have an invitation waiting.');
     }
@@ -343,7 +371,7 @@ export class Lobby {
       return this.send(user, { type: 'error', message: PAUSED });
     }
     const { from, to } = invite;
-    if (from.match || (to.match && !againstBot(to))) return this.closeInvite(invite, 'unavailable');
+    if (from.match || from.solo || to.solo || (to.match && !againstBot(to))) return this.closeInvite(invite, 'unavailable');
     // Accepting ends the game against the computer, as if left for good.
     if (to.match) to.match.abandon(to.seat);
     this.closeInvite(invite, 'accepted');
@@ -360,9 +388,10 @@ export class Lobby {
     const fail = (message) => this.send(user, { type: 'error', message });
     const game = typeof msg.game === 'string' ? this.games.get(msg.game) : undefined;
     if (!game) return fail('Unknown game.');
+    if (game.meta.singlePlayer) return fail('Use the single-player launch button for this game.');
     if (!game.validateBot) return fail('This game cannot be played against the computer.');
     if (this.restart) return fail(PAUSED);
-    if (user.match) return fail('You are already in a game.');
+    if (user.match || user.solo) return fail('You are already in a game.');
     const requested = msg.options && typeof msg.options === 'object' ? msg.options : {};
     const { options, error } = game.validateOptions(requested, this.limits[game.meta.id]);
     if (error) return fail(error);
@@ -411,7 +440,7 @@ export class Lobby {
   // Anyone who is not playing may look on. A spectator has no seat: they get
   // the snapshot for seat `null` and nothing they send reaches the match.
   watch(user, id) {
-    if (user.match) return this.send(user, { type: 'error', message: 'You are in a game yourself.' });
+    if (user.match || user.solo) return this.send(user, { type: 'error', message: 'You are in a game yourself.' });
     const live = this.matches.get(id);
     if (!live) return this.send(user, { type: 'error', message: 'That game is no longer being played.' });
     if (user.watching !== live) {
@@ -444,7 +473,7 @@ export class Lobby {
   // A finished match is shown the way a spectator saw it end.
   async review(user, id) {
     const record = typeof id === 'string' ? await this.archive.get(id) : null;
-    if (user.match) return this.send(user, { type: 'error', message: 'You are in a game yourself.' });
+    if (user.match || user.solo) return this.send(user, { type: 'error', message: 'You are in a game yourself.' });
     if (!record) return this.send(user, { type: 'error', message: 'That game could not be found.' });
     this.stopWatching(user);
     this.send(user, { type: 'match', game: record.game, snapshot: record.snapshot });

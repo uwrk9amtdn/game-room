@@ -1,5 +1,7 @@
 node_modules/
 data/
+# Private standalone build, copied separately to the server repository root.
+/tape-out-beta-2/
 # The Android app project and its signing key; see ANDROID.md.
 android/
 *.keystore

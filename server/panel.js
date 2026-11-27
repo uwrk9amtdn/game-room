@@ -73,7 +73,7 @@ async function tail(file, lines) {
 // and the update buttons. `version` describes the code running. `proxies`
 // and `proxyHttps` describe the HTTPS proxy in front, as above.
 export function createPanel({
-  lobby, archive, stats, feedback = null, passwordFile = null, stateDir = null, updateScript = null, version = null,
+  lobby, archive, stats, feedback = null, standalone = null, passwordFile = null, stateDir = null, updateScript = null, version = null,
   proxies = LOOPBACK, proxyHttps = false,
   now = Date.now, guard = new LoginGuard({ now }), sessions = new Sessions({ now }),
 }) {
@@ -158,6 +158,7 @@ export function createPanel({
       // Every game, in a fixed order, so that each keeps its colour.
       games: [...lobby.games.values()].map((g) => ({ id: g.meta.id, name: g.meta.name })),
       unreadFeedback: feedback ? feedback.unread() : 0,
+      tapeOut: standalone?.settings() ?? null,
       memoryMb: Math.round(memory.rss / 2 ** 20),
       heapMb: Math.round(memory.heapUsed / 2 ** 20),
       players,
@@ -186,6 +187,15 @@ export function createPanel({
       body = await readBody(req);
     } catch {
       return send(res, 400, { error: 'Bad request.' });
+    }
+    if (pathname === '/admin/api/tape-out/password' && standalone) {
+      if (typeof body.password !== 'string' || body.password.length < 5 || body.password.length > 256) {
+        return send(res, 400, { error: 'Use a tester password of 5 to 256 characters.' });
+      }
+      await standalone.setPassword(body.password);
+      for (const user of lobby.users.values()) if (user.solo) lobby.stopSolo(user, 'The tester password changed. Enter the new password to continue.');
+      log('changed Tape-Out tester password', from);
+      return send(res, 200, { ok: true, ...standalone.settings() });
     }
     if (pathname === '/admin/api/records/delete') {
       const done = typeof body.id === 'string' && await archive.delete(body.id);

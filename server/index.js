@@ -17,6 +17,7 @@ import { Stats } from './stats.js';
 import { createPanel } from './panel.js';
 import { FeedbackBox } from './feedback.js';
 import { origin, proxySettings } from './proxy.js';
+import { StandaloneAccess } from './standalone.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
@@ -139,8 +140,10 @@ function currentVersion() {
 // interface for the update script; `passwordFile` (the admin password's
 // hash), `stateDir` and `updateScript` are for the admin panel, see
 // panel.js. Remaining options go to the Lobby. Port 0 picks a free port.
+// `tapeOutDir` lets integration tests supply assets without the private build.
 export async function startServer({
   port = 9494, gamesDir = GAMES, dataDir = null, adminToken = null,
+  tapeOutDir = path.join(root, 'tape-out-beta-2'),
   passwordFile = null, stateDir = null, updateScript = null, panelOptions = {}, feedbackOptions = {}, ...lobbyOptions
 } = {}) {
   const games = await loadGames(gamesDir);
@@ -155,13 +158,22 @@ export async function startServer({
   stats.start();
   const feedback = new FeedbackBox({ dir: dataDir, ...feedbackOptions });
   await feedback.load();
-  const lobby = new Lobby({ games, archive, stats, feedback, ...lobbyOptions });
-  const panel = createPanel({
-    lobby, archive, stats, feedback, passwordFile, stateDir, updateScript, version, ...panelOptions,
-  });
   const proxy = proxySettings(panelOptions);
+  const standalone = new StandaloneAccess({ dataDir, assetDir: tapeOutDir, proxy });
+  await standalone.load();
+  const lobby = new Lobby({ games, archive, stats, feedback, ...lobbyOptions, standalone });
+  const panel = createPanel({
+    lobby, archive, stats, feedback, passwordFile, stateDir, updateScript, version, ...panelOptions, standalone,
+  });
   const server = http.createServer((req, res) => {
-    if (req.url.startsWith('/admin/api/')) {
+    if (req.url.startsWith('/solo/tape-out/')) {
+      standalone.handle(req, res).catch((err) => {
+        console.error('Error serving standalone game:', err);
+        stats.error();
+        if (!res.headersSent) res.writeHead(500).end();
+        else res.destroy();
+      });
+    } else if (req.url.startsWith('/admin/api/')) {
       panel(req, res).catch((err) => {
         console.error('Error in the admin panel:', err);
         stats.error();

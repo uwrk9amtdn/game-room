@@ -24,6 +24,8 @@ let games = new Map(); // id -> meta, as sent by the server
 const clients = new Map(); // id -> the game's browser module
 let route = null; // id of the game page that is open, or null for the grid
 let match = null; // { game, snapshot }: the match being played, watched or just finished
+let solo = null; // a standalone game currently embedded in the platform
+let pendingSolo = null; // launch awaiting server authorization
 let liveMatches = []; // every match anyone could watch right now
 let following = null; // id of the game whose matches the server keeps us posted on
 let previewLimit = Infinity; // with more matches than this, boards are not sent on every move
@@ -111,7 +113,7 @@ function recallWatching() {
   }
 }
 
-const playing = () => Boolean(match && !match.snapshot.over && !spectating());
+const playing = () => Boolean(solo || (match && !match.snapshot.over && !spectating()));
 
 // ---- connection ----
 
@@ -135,6 +137,10 @@ function connect() {
     if (handlers[msg.type]) queue = queue.then(() => handlers[msg.type](msg)).catch(console.error);
   };
   ws.onclose = () => {
+    // Standalone games keep their browser saves; never leave a stale busy status
+    // or an untracked iframe running after the lobby connection is lost.
+    pendingSolo = null;
+    if (solo) clearSolo();
     // Changing the name is a new connection on purpose.
     if (renaming !== null) return connect();
     $('offline').hidden = false;
@@ -171,6 +177,29 @@ function renderRestart() {
 setInterval(renderRestart, 1000);
 
 const handlers = {
+  soloStarted(msg) {
+    if (pendingSolo !== msg.game || route !== msg.game) {
+      send({ type: 'soloStop' });
+      return;
+    }
+    pendingSolo = null;
+    if (match) closeMatch();
+    solo = msg.game;
+    const frame = el('iframe', { src: '/solo/tape-out/index.html', title: 'Tape-Out Beta', className: 'standaloneGame' });
+    frame.setAttribute('allow', 'autoplay; fullscreen');
+    $('matchHost').replaceChildren(frame);
+    showPlayers(false);
+    render();
+  },
+  soloEnded(msg) {
+    pendingSolo = null;
+    clearSolo();
+    if (msg.message) toast(msg.message);
+  },
+  soloError(msg) {
+    pendingSolo = null;
+    toast(msg.message);
+  },
   async joined(msg) {
     me = msg.name;
     // A server that has just started has no restart coming; one that has
@@ -194,7 +223,7 @@ const handlers = {
     // A game we were watching has to be asked for again, once the list of
     // matches shows that it is still being played.
     rewatch = recallWatching();
-    if (playing() || (spectating() && !match.snapshot.over)) closeMatch();
+    if (match && !match.snapshot.over) closeMatch();
     outgoing = null;
     incoming.clear();
     applyRoute();
@@ -330,6 +359,17 @@ function closeMatch() {
   if (mounted) unmount();
 }
 
+function clearSolo() {
+  // Tape-Out flushes its browser-local save on beforeunload. Removing an
+  // iframe alone does not dispatch that event, so flush before teardown.
+  const frame = $('matchHost').querySelector('iframe.standaloneGame');
+  try { frame?.contentWindow?.dispatchEvent(new Event('beforeunload')); }
+  catch { /* A failed frame load has no save to flush. */ }
+  solo = null;
+  $('matchHost').replaceChildren();
+  render();
+}
+
 // ---- routing: "#/" is the grid, "#/<game id>" is that game's page ----
 
 function applyRoute() {
@@ -337,8 +377,8 @@ function applyRoute() {
   const id = location.hash.replace(/^#\/?/, '');
   const next = games.has(id) ? id : null;
   // A match in progress cannot be left by navigating; a finished one is put away.
-  if (playing() && next !== match.game) {
-    location.hash = `#/${match.game}`;
+  if (playing() && next !== (solo || match.game)) {
+    location.hash = `#/${solo || match.game}`;
     return;
   }
   if (match && next !== match.game) closeMatch();
@@ -361,7 +401,9 @@ function render() {
   const meta = games.get(route);
   $('gameTitle').textContent = meta.name;
   $('gameDescription').textContent = meta.description;
-  $('gameHint').hidden = Boolean(match);
+  $('gameHint').hidden = Boolean(match || solo);
+  $('inviteHint').hidden = Boolean(meta.singlePlayer);
+  $('multiplayerLists').hidden = Boolean(meta.singlePlayer);
   $('playBot').hidden = !clients.get(route).botForm;
   $('playBot').textContent = clients.get(route).botLabel || 'Play the computer';
   // No new games while the server waits to restart.
@@ -374,9 +416,12 @@ function render() {
   // Rematch is offered once a match is over; assumes the two-player games the
   // lobby seats today. A spectator can leave at any time.
   const over = Boolean(match && match.snapshot.over);
-  $('afterGame').hidden = !over && !spectating();
-  $('rematch').hidden = spectating();
-  $('closeMatch').textContent = spectating() && !over ? 'Stop watching' : 'Close';
+  $('afterGame').hidden = !solo && !over && !spectating();
+  $('soloFullscreen').hidden = !solo;
+  $('soloFullscreen').disabled = !document.fullscreenEnabled;
+  $('soloFeedback').hidden = !solo;
+  $('rematch').hidden = Boolean(solo) || spectating();
+  $('closeMatch').textContent = solo ? 'Exit game' : spectating() && !over ? 'Stop watching' : 'Close';
   if (over && !spectating()) {
     const rival = opponent();
     // Someone playing the computer can still be asked.
@@ -389,7 +434,7 @@ function render() {
 // Game menus own their listeners just like match views. Do not rebuild a
 // team's editor when another player joins or a live match list refreshes.
 function syncGameHome() {
-  const wanted = route && !match && clients.get(route)?.home ? route : null;
+  const wanted = route && !match && !solo && clients.get(route)?.home ? route : null;
   if (mountedHome?.game === wanted) return;
   mountedHome?.view?.destroy?.();
   mountedHome = null;
@@ -397,6 +442,11 @@ function syncGameHome() {
   if (wanted) {
     mountedHome = { game: wanted, view: clients.get(wanted).home($('gameHome'), {
       toast,
+      startSolo: (token) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return toast('Reconnect before starting a game.');
+        pendingSolo = wanted;
+        send({ type: 'soloStart', game: wanted, token });
+      },
       playComputer: () => $('playBot').click(),
       invitePlayer: () => showPlayers(true),
     }) };
@@ -415,8 +465,20 @@ $('rematch').addEventListener('click', () => {
   else send({ type: 'invite', to: opponent(), game: match.game, options });
 });
 $('closeMatch').addEventListener('click', () => {
+  if (solo) {
+    send({ type: 'soloStop' });
+    clearSolo();
+    return;
+  }
   closeMatch();
   render();
+});
+
+$('soloFullscreen').addEventListener('click', async () => {
+  const frame = $('matchHost').querySelector('iframe.standaloneGame');
+  if (!solo || !frame) return;
+  try { await frame.requestFullscreen(); }
+  catch { toast('The browser could not open fullscreen.'); }
 });
 
 // One match in a grid: the last seat's name, the game's own preview, the
@@ -493,7 +555,7 @@ function renderGrid() {
       el('span', { className: 'gameText' },
         el('strong', { textContent: g.name }),
         el('span', { className: 'gameMeta' },
-          el('span', { textContent: `${g.players} players` }),
+          el('span', { textContent: g.singlePlayer ? '1 player · Password required' : `${g.players} players` }),
           el('span', { className: 'gameSep', textContent: ' · ' }),
           el('span', { textContent: `${active} playing now` }))));
   }));
@@ -542,7 +604,7 @@ function renderUsers() {
   const sorted = [...users].sort((a, b) => (b.name === me) - (a.name === me) || a.name.localeCompare(b.name));
   $('userCount').textContent = users.length;
   $('users').replaceChildren(...sorted.map((u) => {
-    const doing = u.vsBot ? 'playing the computer' : u.status;
+    const doing = u.vsBot ? 'playing the computer' : games.get(u.game)?.singlePlayer ? 'playing' : u.status;
     let status = u.game && games.has(u.game) ? `${doing} · ${games.get(u.game).name}` : doing;
     if (u.name === me) status = `you · ${status}`;
     const li = el('li', {},
@@ -551,7 +613,7 @@ function renderUsers() {
       el('span', { className: `userStatus ${u.status}`, textContent: status }));
     // Invitations are for the game whose page is open.
     // Someone playing the computer can be invited too; accepting ends that game.
-    if (route && u.name !== me && (u.status === 'idle' || u.vsBot) && !playing() && !outgoing) {
+    if (route && !games.get(route)?.singlePlayer && u.name !== me && (u.status === 'idle' || u.vsBot) && !playing() && !outgoing) {
       li.append(el('button', { textContent: 'Invite', disabled: Boolean(restartNotice), onclick: () => openInvite(u.name) }));
     }
     return li;
@@ -616,7 +678,7 @@ function renderInvites() {
   }
   for (const invite of incoming.values()) {
     // Accepting ends a game against the computer under way.
-    const ends = playing() && botOf(match.snapshot) ? ' Accepting ends your game against the computer.' : '';
+    const ends = match && playing() && botOf(match.snapshot) ? ' Accepting ends your game against the computer.' : '';
     cards.push(el('div', { className: 'invite' },
       el('p', {}, el('strong', { textContent: invite.from }), ` challenges you to ${describeInvite(invite)}.${ends}`),
       el('button', { className: 'primary', textContent: 'Accept', onclick: () => send({ type: 'accept', id: invite.id }) }),
@@ -736,12 +798,14 @@ function holdFeedback(ms) {
   if (feedbackUntil > Date.now()) feedbackTimer = setInterval(tick, 1000);
 }
 
-$('feedbackOpen').addEventListener('click', () => {
+function openFeedback() {
   $('feedbackError').textContent = '';
   countFeedback();
   $('feedbackDialog').showModal();
   $('feedbackText').focus();
-});
+}
+$('feedbackOpen').addEventListener('click', openFeedback);
+$('soloFeedback').addEventListener('click', openFeedback);
 $('feedbackCancel').addEventListener('click', () => $('feedbackDialog').close());
 $('feedbackText').addEventListener('input', countFeedback);
 $('feedbackForm').addEventListener('submit', (e) => {

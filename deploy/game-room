@@ -1,8 +1,8 @@
 #!/bin/sh
 #
-# Runs Game Room on FreeBSD as an ordinary user, without root: kept alive by
-# daemon(8), started at boot and brought up to date by the user's own
-# crontab. See DEPLOY.md.
+# Runs Game Room as an ordinary user, without root: kept alive by FreeBSD's
+# daemon(8) or a portable background supervisor, started at boot and brought
+# up to date by the user's own crontab. See DEPLOY.md.
 #
 #   game-room start       start the server, unless it is running
 #   game-room stop        stop it (ending any games in progress)
@@ -29,7 +29,7 @@
 #
 #   port=9494                   # the port to listen on
 #   data_dir=/path/to/data      # finished games; the checkout's data/ if unset
-#   node=/path/to/node          # if node is not /usr/local/bin/node
+#   node=/path/to/node          # override automatic Node discovery
 #   branch=master               # the branch to follow
 #   warning=300                 # seconds of warning before an update
 #   proxy_addresses=127.0.0.1   # where the HTTPS proxy connects from
@@ -39,10 +39,13 @@ set -u
 
 self="$(realpath "$0")"
 dir="$(realpath "$(dirname "$self")/..")"
-state="$HOME/.game-room"
+state="${GAME_ROOM_STATE:-$HOME/.game-room}"
 port=9494
 data_dir="$dir/data"
 node=/usr/local/bin/node
+if [ ! -x "$node" ]; then
+	node="$(command -v node 2>/dev/null || printf '%s' /usr/local/bin/node)"
+fi
 branch=master
 warning=300
 proxy_addresses=
@@ -68,6 +71,14 @@ log()
 	return 0
 }
 
+require_node()
+{
+	if ! command -v "$node" >/dev/null 2>&1; then
+		echo "Node.js not found at $node. Set node=/absolute/path/to/node in $state/config (use: command -v node)." >&2
+		return 1
+	fi
+}
+
 # Where an announced restart stands, from the server itself: "none",
 # "waiting <seconds> <games>" or "ready". Fails if the server cannot be
 # asked (not running, or started before it had an admin interface).
@@ -78,7 +89,7 @@ admin()
 
 # ---- the server ----
 
-# The pid of the daemon(8) looking after the server, if it is running. The
+# The pid of the supervisor looking after the server, if it is running. The
 # process title is checked too, as a pid left over from before a reboot may
 # now belong to something else.
 running()
@@ -88,8 +99,42 @@ running()
 	ps -p "$pid" -o args= 2>/dev/null | grep -q game-room
 }
 
+# Linux has no FreeBSD daemon(8). Keep one child alive under nohup instead;
+# stopping this supervisor also stops and reaps its current child.
+supervise()
+{
+	child=
+	trap 'exit 0' INT TERM
+	trap 'if [ -n "$child" ]; then kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; fi; rm -f "$pidfile"' EXIT
+	echo "$$" > "$pidfile"
+	while :; do
+		"$node" server/index.js &
+		child=$!
+		wait "$child"
+		child=
+		sleep 1 &
+		child=$!
+		wait "$child"
+		child=
+	done
+}
+
+launch_supervisor()
+{
+	case "$(uname -s)" in
+	FreeBSD)
+		# -r restarts the child, -P records the supervisor's pid, -o logs.
+		daemon -r -P "$pidfile" -o "$state/server.log" -t game-room "$node" server/index.js
+		;;
+	*)
+		nohup "$self" _supervise >> "$state/server.log" 2>&1 < /dev/null &
+		;;
+	esac
+}
+
 start()
 {
+	require_node || return 1
 	if running; then
 		echo "already running (pid $pid)"
 		return 0
@@ -103,13 +148,11 @@ start()
 		(umask 077 && od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$token")
 	fi
 	cd "$dir" || exit 1
-	# -r starts the server again a second after it stops, -P records
-	# daemon's own pid so that stopping it stops the server too, -o keeps
-	# the server's output, -t names the process.
+	# Both supervisors inherit the same server configuration.
 	PORT="$port" DATA_DIR="$data_dir" ADMIN_TOKEN="$(cat "$token")" \
 		ADMIN_PASSWORD_FILE="$password" GAME_ROOM_STATE="$state" GAME_ROOM_SCRIPT="$self" \
 		PROXY_ADDRESSES="$proxy_addresses" PROXY_HTTPS="$proxy_https" \
-		daemon -r -P "$pidfile" -o "$state/server.log" -t game-room "$node" server/index.js
+		launch_supervisor
 	sleep 1
 	if running; then
 		echo "started (pid $pid)"
@@ -166,6 +209,7 @@ status()
 # only its hash, readable by this user alone. Anyone logged in is logged out.
 set_password()
 {
+	require_node || return 1
 	if [ ! -t 0 ]; then
 		echo "run this in a terminal" >&2
 		return 1
@@ -335,6 +379,7 @@ check) rm -f "$hurry" ;;
 esac
 
 case "${1:-}" in
+_supervise) supervise ;;
 start) start ;;
 stop) stop ;;
 restart) stop && start ;;

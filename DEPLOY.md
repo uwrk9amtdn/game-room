@@ -1,6 +1,11 @@
-# Running the server on FreeBSD
+# Running the server on FreeBSD or Linux
 
-This keeps Game Room running on a FreeBSD server without root and without tmux. It starts at boot, comes back if it stops, and updates itself after a push to `master` without cutting games short. All of it runs as your own user, from your own crontab, through one script, [deploy/game-room](deploy/game-room).
+This keeps Game Room running on a FreeBSD or Linux server without root and without tmux. It starts at boot, comes back if it stops, and updates itself after a push to `master` without cutting games short. All of it runs as your own user, from your own crontab, through one script, [deploy/game-room](deploy/game-room).
+
+FreeBSD uses its built-in `daemon(8)`. Linux uses a background shell supervisor
+under `nohup`, which restarts Node after it exits and stops its child when you
+run `stop` or `restart`. No `daemon` package is needed on Linux. Both use the
+same commands, config, pid file and log paths.
 
 ## How an update goes
 
@@ -29,6 +34,8 @@ Run them on the server, from the checkout:
 Only one `check` or `update-now` runs at a time. While one is waiting, a second one says so and leaves it be.
 
 The script keeps the server's pid file, logs and the admin token (below) in `~/.game-room/`.
+`GAME_ROOM_STATE` can select a separate state directory for isolated instances
+or tests; its `config` should also specify a distinct port and data directory.
 
 ## 1. Check the server has what it needs
 
@@ -39,7 +46,9 @@ crontab -l
 
 `crontab -l` saying "no crontab for ..." is fine; an error saying you are not allowed to use cron is not, and needs the administrator.
 
-If `node` is anywhere but `/usr/local/bin/node`, tell the script where (step 2).
+The script uses `/usr/local/bin/node` when present, otherwise discovers `node`
+from your PATH. For nvm or another nonstandard installation, configure its
+absolute path (step 2) so cron can find it too.
 
 Cron has no SSH agent and nobody to type a passphrase, so `git fetch` must work on its own. Try it in the checkout:
 
@@ -56,10 +65,16 @@ Create `~/.game-room/config` only if something differs from these defaults:
 ```sh
 port=9494                 # the port to listen on
 data_dir=$HOME/game-room/data   # where finished games are kept (default: the checkout's data/)
-node=/usr/local/bin/node  # the node to run, e.g. one installed with nvm
+node=/usr/local/bin/node  # optional override; use the output of: command -v node
 branch=master             # the branch to follow
 warning=300               # seconds of warning before an update
 ```
+
+If a command reports `/usr/local/bin/node: No such file or directory`, run
+`command -v node` on the server and set `node` in this config to the reported
+absolute path. Replace any existing `node=` line. If Node is managed by nvm,
+load the intended Node version first. Then retry the command. The script checks
+for Node before asking for an admin password.
 
 ## 3. Move the server out of tmux
 

@@ -31,6 +31,10 @@ export default {
 
 The lobby currently seats exactly two players per match. A game for more needs the invitation flow in `server/lobby.js` extended first.
 
+Tape-Out uses a separate protected single-player session with `players: 1` and
+`singlePlayer: true`. It does not implement the multiplayer match contract below.
+See [standalone hosting](../doc/standalone-games.md) for its launch flow and access control.
+
 ## `server/index.js`
 
 Default-export an object with:

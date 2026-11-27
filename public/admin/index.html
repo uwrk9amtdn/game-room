@@ -64,6 +64,19 @@
       </section>
 
       <section>
+        <h2>Tape-Out beta access</h2>
+        <p id="tapeOutStatus" class="muted"></p>
+        <form id="tapeOutPasswordForm" class="adminActions">
+          <label>New tester password
+            <input id="tapeOutPassword" type="password" autocomplete="new-password" minlength="5" maxlength="256" required>
+          </label>
+          <button id="saveTapeOutPassword" class="primary">Set tester password</button>
+        </form>
+        <p class="muted">Share this password with testers. Changing it ends current Tape-Out sessions and requires the new password.</p>
+        <p id="tapeOutMessage" role="status"></p>
+      </section>
+
+      <section>
         <div class="sectionHead">
           <h2>Activity</h2>
           <div id="range" class="adminRange" role="group" aria-label="Days shown"></div>
